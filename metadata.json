@@ -1,0 +1,6 @@
+{
+  "name": "ColorLink - Pintuco Ecosistema Inteligente",
+  "description": "Ecosistema inteligente que transforma necesidades de pintura y recubrimiento en soluciones técnicas, comerciales y operacionales automatizadas con IA.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
