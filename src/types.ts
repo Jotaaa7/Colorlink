@@ -150,6 +150,8 @@ export interface ProjectRequest {
   quotation?: Quotation;
   plantStocks?: PlantStock[];
   productionOrder?: ProductionOrder;
+  assignedAdvisor?: string;
+  technicalReviewNotes?: string;
 }
 
 export type UserRole =
@@ -157,7 +159,9 @@ export type UserRole =
   | 'Constructora / Arquitecto'
   | 'Cliente Particular'
   | 'Distribuidor / Tienda'
-  | 'Especialista Técnico Pintuco';
+  | 'Especialista Técnico Pintuco'
+  | 'Asesor Comercial / Técnico'
+  | 'Administrador Pintuco';
 
 export interface UserProfile {
   id: string;
@@ -175,6 +179,9 @@ export interface UserProfile {
 
 export type ActiveTab =
   | 'new_request'
+  | 'project_status'
+  | 'advisor_portal'
+  | 'advisor_inventory'
   | 'ecosystem_hub'
   | 'technical_diagnosis'
   | 'commercial_quote'

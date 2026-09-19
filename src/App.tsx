@@ -5,12 +5,23 @@ import { Header } from './components/Header';
 import { NewRequestForm } from './components/NewRequestForm';
 import { ColorLinkEcosystem } from './components/ColorLinkEcosystem';
 import { AuthScreen, DEMO_USERS } from './components/AuthScreen';
+import { ProjectStatusScreen } from './components/ProjectStatusScreen';
+import { AdvisorEvaluationScreen } from './components/AdvisorEvaluationScreen';
+import { AdvisorInventoryScreen } from './components/AdvisorInventoryScreen';
 import { ServicesModal } from './components/ServicesModal';
 import { SupportModal } from './components/SupportModal';
 import { Footer } from './components/Footer';
+import {
+  getRemoteProjectRequests,
+  saveRemoteProjectRequest,
+  saveRemoteUserProfile,
+  checkSupabaseConnection,
+} from './services/supabaseService';
+import { isSupabaseConfigured } from './lib/supabase';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('new_request');
+  const [supabaseConnected, setSupabaseConnected] = useState<boolean | null>(null);
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => {
     try {
       const saved = localStorage.getItem('colorlink_user');
@@ -26,6 +37,30 @@ export default function App() {
   const [isServicesOpen, setIsServicesOpen] = useState(false);
   const [isSupportOpen, setIsSupportOpen] = useState(false);
 
+  // Initialize Supabase and check live database connection
+  useEffect(() => {
+    async function initSupabase() {
+      if (isSupabaseConfigured()) {
+        try {
+          const status = await checkSupabaseConnection();
+          setSupabaseConnected(status.connected);
+          if (status.connected) {
+            const remoteRequests = await getRemoteProjectRequests();
+            if (remoteRequests && remoteRequests.length > 0) {
+              setCurrentRequest(remoteRequests[0]);
+            }
+          }
+        } catch (err) {
+          console.warn('Error conectando con Supabase:', err);
+          setSupabaseConnected(false);
+        }
+      } else {
+        setSupabaseConnected(false);
+      }
+    }
+    initSupabase();
+  }, []);
+
   const handleLoginSuccess = (user: UserProfile) => {
     setCurrentUser(user);
     try {
@@ -33,6 +68,10 @@ export default function App() {
     } catch {
       // ignore
     }
+    // Asynchronously upsert profile into Supabase
+    saveRemoteUserProfile(user).catch((err) =>
+      console.warn('Supabase profile save notice:', err)
+    );
     setActiveTab('new_request');
   };
 
@@ -44,6 +83,18 @@ export default function App() {
       // ignore
     }
     setActiveTab('login');
+  };
+
+  const handleSwitchToAdvisorAccount = () => {
+    const advisorUser =
+      DEMO_USERS.find((u) => u.role === 'Especialista Técnico Pintuco') || DEMO_USERS[1];
+    setCurrentUser(advisorUser);
+    try {
+      localStorage.setItem('colorlink_user', JSON.stringify(advisorUser));
+    } catch {
+      // ignore
+    }
+    setActiveTab('advisor_portal');
   };
 
   // Handle Submission of New Request
@@ -166,6 +217,10 @@ export default function App() {
       };
 
       setCurrentRequest(completedRequest);
+      // Persist to Supabase database asynchronously
+      saveRemoteProjectRequest(completedRequest).catch((err) =>
+        console.warn('Supabase request save notice:', err)
+      );
       setActiveTab('ecosystem_hub');
     } catch (error) {
       console.error('Error submitting request:', error);
@@ -185,6 +240,7 @@ export default function App() {
         setActiveTab={setActiveTab}
         currentRequest={currentRequest}
         currentUser={currentUser}
+        supabaseConnected={supabaseConnected}
         onLogout={handleLogout}
         onOpenSupport={() => setIsSupportOpen(true)}
         onOpenServices={() => setIsServicesOpen(true)}
@@ -204,6 +260,32 @@ export default function App() {
             onLoginSuccess={handleLoginSuccess}
             onNavigateToRequest={() => setActiveTab('new_request')}
           />
+        ) : activeTab === 'project_status' ? (
+          <ProjectStatusScreen
+            request={currentRequest}
+            onNavigateToRequest={() => setActiveTab('new_request')}
+            onNavigateToEcosystem={() => setActiveTab('ecosystem_hub')}
+            onOpenSupport={() => setIsSupportOpen(true)}
+            onNavigateToAdvisorPortal={() => setActiveTab('advisor_portal')}
+          />
+        ) : activeTab === 'advisor_portal' ? (
+          <AdvisorEvaluationScreen
+            currentUser={currentUser}
+            request={currentRequest}
+            onSwitchToAdvisorAccount={handleSwitchToAdvisorAccount}
+            onOpenLogin={() => setActiveTab('login')}
+            onNavigateHome={() => setActiveTab('new_request')}
+            onNavigateToInventory={() => setActiveTab('advisor_inventory')}
+          />
+        ) : activeTab === 'advisor_inventory' ? (
+          <AdvisorInventoryScreen
+            currentUser={currentUser}
+            request={currentRequest}
+            onSwitchToAdvisorAccount={handleSwitchToAdvisorAccount}
+            onOpenLogin={() => setActiveTab('login')}
+            onNavigateHome={() => setActiveTab('new_request')}
+            onNavigateToDiagnosis={() => setActiveTab('advisor_portal')}
+          />
         ) : activeTab === 'new_request' ? (
           <NewRequestForm
             onSubmitRequest={handleSubmitRequest}
@@ -215,6 +297,7 @@ export default function App() {
             <ColorLinkEcosystem
               request={currentRequest}
               onBackToForm={() => setActiveTab('new_request')}
+              onNavigateToStatus={() => setActiveTab('project_status')}
             />
           )
         )}

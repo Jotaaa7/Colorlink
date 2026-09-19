@@ -12,6 +12,9 @@ import {
   LogOut,
   ChevronDown,
   Building2,
+  Clock,
+  Warehouse,
+  Database,
 } from 'lucide-react';
 
 interface HeaderProps {
@@ -19,6 +22,7 @@ interface HeaderProps {
   setActiveTab: (tab: ActiveTab) => void;
   currentRequest: ProjectRequest | null;
   currentUser: UserProfile | null;
+  supabaseConnected?: boolean | null;
   onLogout: () => void;
   onOpenSupport: () => void;
   onOpenServices: () => void;
@@ -29,6 +33,7 @@ export const Header: React.FC<HeaderProps> = ({
   setActiveTab,
   currentRequest,
   currentUser,
+  supabaseConnected,
   onLogout,
   onOpenSupport,
   onOpenServices,
@@ -99,6 +104,43 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
 
           <button
+            onClick={() => setActiveTab('project_status')}
+            className={`px-3.5 py-2 rounded-xl text-sm font-bold transition-all flex items-center gap-1.5 relative ${
+              activeTab === 'project_status'
+                ? 'text-[#725c00] bg-[#f6eddb] shadow-2xs'
+                : 'text-[#4d4632] hover:text-[#725c00] hover:bg-[#f6eddb]'
+            }`}
+            id="nav-project-status-btn"
+          >
+            <Clock className="w-4 h-4 text-[#edc200]" />
+            <span className="hidden sm:inline">Estado del Proyecto</span>
+            <span className="sm:hidden">Seguimiento</span>
+            {activeTab === 'project_status' && (
+              <span className="absolute bottom-0 left-4 right-4 h-0.5 bg-[#725c00] rounded-full"></span>
+            )}
+          </button>
+
+          <button
+            onClick={() => setActiveTab('advisor_portal')}
+            className={`px-3.5 py-2 rounded-xl text-sm font-bold transition-all flex items-center gap-1.5 relative ${
+              activeTab === 'advisor_portal'
+                ? 'text-[#725c00] bg-[#f6eddb] shadow-2xs'
+                : 'text-[#4d4632] hover:text-[#725c00] hover:bg-[#f6eddb]'
+            }`}
+            id="nav-advisor-portal-btn"
+          >
+            <ShieldCheck className="w-4 h-4 text-[#725c00]" />
+            <span className="hidden sm:inline">Portal Asesor</span>
+            <span className="sm:hidden">Asesor</span>
+            <span className="text-[10px] font-black px-1.5 py-0.5 bg-[#ffd100] text-[#6f5a00] rounded-sm tracking-wider">
+              PRO
+            </span>
+            {(activeTab === 'advisor_portal' || activeTab === 'advisor_inventory') && (
+              <span className="absolute bottom-0 left-4 right-4 h-0.5 bg-[#725c00] rounded-full"></span>
+            )}
+          </button>
+
+          <button
             onClick={() => setActiveTab('ecosystem_hub')}
             className={`px-3.5 py-2 rounded-xl text-sm font-bold transition-all flex items-center gap-1.5 relative ${
               activeTab === 'ecosystem_hub' ||
@@ -123,6 +165,24 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* User Profile / Auth Actions & Soporte */}
         <div className="flex items-center gap-2 sm:gap-3">
+          {/* Supabase Database Connection Badge */}
+          <div
+            className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold border transition-colors ${
+              supabaseConnected
+                ? 'bg-[#e6f4ea] text-[#137333] border-[#ceead6]'
+                : 'bg-[#f6eddb] text-[#7f765f] border-[#ebe2cf]'
+            }`}
+            title={
+              supabaseConnected
+                ? 'Base de datos Supabase conectada y sincronizada'
+                : 'Conector Supabase preparado (agrega tus llaves en .env para persistencia en nube)'
+            }
+          >
+            <Database className="w-3.5 h-3.5" />
+            <span className="w-1.5 h-1.5 rounded-full shrink-0 animate-pulse bg-current"></span>
+            <span>{supabaseConnected ? 'Supabase Conectado' : 'Supabase Listo'}</span>
+          </div>
+
           {currentUser ? (
             /* Logged In User Dropdown */
             <div className="relative" ref={menuRef}>
@@ -171,6 +231,39 @@ export const Header: React.FC<HeaderProps> = ({
                   </div>
 
                   <div className="space-y-1">
+                    <button
+                      onClick={() => {
+                        setIsUserMenuOpen(false);
+                        setActiveTab('project_status');
+                      }}
+                      className="w-full text-left px-3 py-2 rounded-xl text-xs font-semibold text-[#1f1b10] hover:bg-[#fff8f0] flex items-center gap-2"
+                    >
+                      <Clock className="w-3.5 h-3.5 text-[#edc200]" />
+                      <span>Estado del Proyecto (Seguimiento)</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setIsUserMenuOpen(false);
+                        setActiveTab('advisor_portal');
+                      }}
+                      className="w-full text-left px-3 py-2 rounded-xl text-xs font-bold text-[#725c00] hover:bg-[#fff8f0] flex items-center gap-2"
+                    >
+                      <ShieldCheck className="w-3.5 h-3.5 text-[#725c00]" />
+                      <span>Portal Técnico Asesor (Diagnóstico & IA)</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setIsUserMenuOpen(false);
+                        setActiveTab('advisor_inventory');
+                      }}
+                      className="w-full text-left px-3 py-2 rounded-xl text-xs font-bold text-[#0d4788] hover:bg-[#fff8f0] flex items-center gap-2"
+                    >
+                      <Warehouse className="w-3.5 h-3.5 text-[#0d4788]" />
+                      <span>Control de Inventario & SAP (PRO)</span>
+                    </button>
+
                     <button
                       onClick={() => {
                         setIsUserMenuOpen(false);

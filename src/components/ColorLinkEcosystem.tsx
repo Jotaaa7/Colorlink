@@ -35,12 +35,14 @@ import {
 interface ColorLinkEcosystemProps {
   request: ProjectRequest;
   onBackToForm: () => void;
+  onNavigateToStatus?: () => void;
   onUpdateOrderStatus?: (status: any) => void;
 }
 
 export const ColorLinkEcosystem: React.FC<ColorLinkEcosystemProps> = ({
   request,
   onBackToForm,
+  onNavigateToStatus,
 }) => {
   const [activeSubTab, setActiveSubTab] = useState<
     'technical' | 'commercial' | 'inventory' | 'production_qa' | 'ai_chat'
@@ -170,6 +172,16 @@ export const ColorLinkEcosystem: React.FC<ColorLinkEcosystemProps> = ({
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
+            {onNavigateToStatus && (
+              <button
+                onClick={onNavigateToStatus}
+                className="px-4 py-2 rounded-xl bg-[#f6eddb] border border-[#d1c6ab] text-[#725c00] text-xs sm:text-sm font-bold hover:bg-[#f0e7d5] transition-colors flex items-center gap-1.5"
+                id="btn-goto-project-status"
+              >
+                <Clock className="w-4 h-4 text-[#edc200]" />
+                <span>Estado del Proyecto</span>
+              </button>
+            )}
             <button
               onClick={onBackToForm}
               className="px-4 py-2 rounded-xl border border-[#d1c6ab] text-[#4d4632] text-xs sm:text-sm font-bold hover:bg-[#f6eddb] transition-colors"
