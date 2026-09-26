@@ -3,7 +3,7 @@ import { ProjectRequest, SurfaceType, SurfaceCondition } from '../types';
 export interface PintucoCatalogItem {
   sku: string;
   name: string;
-  category: 'Arquitectónica' | 'Construcción' | 'Madera' | 'Metal' | 'Industrial y Alto Desempeño';
+  category: 'Arquitectónica' | 'Construcción' | 'Madera' | 'Metal' | 'Industrial y Alto Desempeño' | 'Herramientas y Accesorios';
   description: string;
   coverageM2PerGal: number;
   priceCOP: number;
@@ -16,6 +16,7 @@ export interface PintucoCatalogItem {
   image: string;
   recommendedSurfaces: SurfaceType[];
   indoorOutdoor: 'interior' | 'exterior' | 'ambos';
+  hasColors: boolean;
 }
 
 export const PINTUCO_CATALOG: PintucoCatalogItem[] = [
@@ -35,6 +36,7 @@ export const PINTUCO_CATALOG: PintucoCatalogItem[] = [
     image: 'https://images.unsplash.com/photo-1589939705384-5185137a7f0f?w=400&q=80',
     recommendedSurfaces: ['Pared', 'Drywall', 'Concreto'],
     indoorOutdoor: 'interior',
+    hasColors: true,
   },
   {
     sku: 'PT-KZ-4020',
@@ -52,6 +54,7 @@ export const PINTUCO_CATALOG: PintucoCatalogItem[] = [
     image: 'https://images.unsplash.com/photo-1513694203232-719a280e022f?w=400&q=80',
     recommendedSurfaces: ['Fachada', 'Pared', 'Concreto'],
     indoorOutdoor: 'exterior',
+    hasColors: true,
   },
   {
     sku: 'PT-PL-3001',
@@ -69,6 +72,7 @@ export const PINTUCO_CATALOG: PintucoCatalogItem[] = [
     image: 'https://images.unsplash.com/photo-1504917599217-d4dc5ebe6122?w=400&q=80',
     recommendedSurfaces: ['Metal', 'Tanque Industrial'],
     indoorOutdoor: 'ambos',
+    hasColors: true,
   },
   {
     sku: 'PT-MD-5012',
@@ -86,6 +90,7 @@ export const PINTUCO_CATALOG: PintucoCatalogItem[] = [
     image: 'https://images.unsplash.com/photo-1538688525198-9b88f6f53126?w=400&q=80',
     recommendedSurfaces: ['Madera'],
     indoorOutdoor: 'ambos',
+    hasColors: false,
   },
   {
     sku: 'PT-EP-8090',
@@ -103,6 +108,7 @@ export const PINTUCO_CATALOG: PintucoCatalogItem[] = [
     image: 'https://images.unsplash.com/photo-1581092160607-ee22621dd758?w=400&q=80',
     recommendedSurfaces: ['Piso', 'Concreto', 'Tanque Industrial'],
     indoorOutdoor: 'interior',
+    hasColors: true,
   },
   {
     sku: 'PT-SM-2005',
@@ -120,6 +126,7 @@ export const PINTUCO_CATALOG: PintucoCatalogItem[] = [
     image: 'https://images.unsplash.com/photo-1562654501-a0ccc0fc3fb1?w=400&q=80',
     recommendedSurfaces: ['Pared', 'Fachada', 'Drywall', 'Concreto'],
     indoorOutdoor: 'ambos',
+    hasColors: false,
   },
   {
     sku: 'PT-AQ-6001',
@@ -137,6 +144,43 @@ export const PINTUCO_CATALOG: PintucoCatalogItem[] = [
     image: 'https://images.unsplash.com/photo-1590381105924-c72589b9ef3f?w=400&q=80',
     recommendedSurfaces: ['Techo', 'Fachada', 'Concreto'],
     indoorOutdoor: 'exterior',
+    hasColors: true,
+  },
+  {
+    sku: 'PT-EST-105',
+    name: 'Estuco Acrílico Profesional Listo Interior/Exterior',
+    category: 'Construcción',
+    description: 'Masilla acrílica de excelente blancura y alta adherencia para resanar y emparejar muros antes del acabado de pintura.',
+    coverageM2PerGal: 18,
+    priceCOP: 48500,
+    recommendedCoats: 2,
+    dryingTimeTouch: '1 hora',
+    dryingTimeRecoat: '3-4 horas',
+    solidsByVolume: 55,
+    voc: '< 15 g/L',
+    sheen: 'Blanco liso',
+    image: 'https://images.unsplash.com/photo-1589939705384-5185137a7f0f?w=400&q=80',
+    recommendedSurfaces: ['Pared', 'Drywall', 'Concreto'],
+    indoorOutdoor: 'ambos',
+    hasColors: false,
+  },
+  {
+    sku: 'ACC-KIT-PRO',
+    name: 'Kit Profesional de Aplicación Pintuco (Rodillos + Brochas + Bandeja)',
+    category: 'Herramientas y Accesorios',
+    description: 'Kit de alta gama con 2 rodillos de microfibra antigoteo 3/8", 2 brochas cerda mixta 2" y bandeja ergonómica reforzada.',
+    coverageM2PerGal: 1,
+    priceCOP: 48000,
+    recommendedCoats: 1,
+    dryingTimeTouch: 'N/A',
+    dryingTimeRecoat: 'N/A',
+    solidsByVolume: 100,
+    voc: '0 g/L',
+    sheen: 'N/A',
+    image: 'https://images.unsplash.com/photo-1505797149-43b0069ec26b?w=400&q=80',
+    recommendedSurfaces: ['Pared', 'Fachada', 'Piso', 'Metal', 'Madera'],
+    indoorOutdoor: 'ambos',
+    hasColors: false,
   },
 ];
 
@@ -263,12 +307,18 @@ export const INITIAL_DEMO_REQUEST: ProjectRequest = {
     items: [
       {
         sku: 'PT-VX-1010',
-        name: 'Viniltex® Avanzado Antibacterial (Tono Arena Cálido)',
+        name: 'Viniltex® Avanzado Antibacterial (Tono Salmón Terracota)',
         type: 'Pintura Acabado',
         unit: 'Caneca (5 Gal) x 2 + Galón x 1',
         quantity: 11,
         unitPriceCOP: 94500,
         totalCOP: 1039500,
+        hasColors: true,
+        selectedColorMode: 'suggestion',
+        selectedColorName: 'Salmón Terracota',
+        selectedColorHex: '#E28468',
+        selectedColorCode: 'PT-248-A',
+        finishPreference: 'Mate',
       },
       {
         sku: 'PT-SM-2005',
@@ -278,6 +328,7 @@ export const INITIAL_DEMO_REQUEST: ProjectRequest = {
         quantity: 5,
         unitPriceCOP: 62000,
         totalCOP: 310000,
+        hasColors: false,
       },
       {
         sku: 'ACC-KIT-PRO',
@@ -287,6 +338,7 @@ export const INITIAL_DEMO_REQUEST: ProjectRequest = {
         quantity: 2,
         unitPriceCOP: 48000,
         totalCOP: 96000,
+        hasColors: false,
       },
     ],
     subtotalCOP: 1445500,

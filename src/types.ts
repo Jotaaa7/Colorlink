@@ -42,6 +42,10 @@ export interface RecommendedProduct {
   totalGallonsNeeded: number;
   estimatedCostCOP: number;
   reason: string;
+  hasColors?: boolean;
+  selectedColorHex?: string;
+  selectedColorName?: string;
+  selectedColorCode?: string;
 }
 
 export interface AIDiagnosis {
@@ -68,6 +72,14 @@ export interface QuotationItem {
   quantity: number;
   unitPriceCOP: number;
   totalCOP: number;
+  hasColors?: boolean;
+  selectedColorMode?: 'suggestion' | 'custom_wheel';
+  selectedColorName?: string;
+  selectedColorHex?: string;
+  selectedColorCode?: string;
+  isCustomManual?: boolean;
+  finishPreference?: string;
+  notes?: string;
 }
 
 export interface Quotation {

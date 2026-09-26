@@ -8,6 +8,8 @@ import {
   UserProfile,
 } from '../types';
 import { SAMPLE_PHOTO_PRESETS, SamplePhotoPreset } from '../data/pintucoProducts';
+import { ColorSelectorModal, ColorSelectionResult } from './ColorSelectorModal';
+import { PINTUCO_SUGGESTED_COLORS } from '../lib/colorUtils';
 import {
   UploadCloud,
   CheckCircle2,
@@ -20,6 +22,8 @@ import {
   Clock,
   MapPin,
   UserCheck,
+  Palette,
+  Disc,
 } from 'lucide-react';
 
 interface NewRequestFormProps {
@@ -74,6 +78,10 @@ export const NewRequestForm: React.FC<NewRequestFormProps> = ({
     'Buscamos un acabado mate lavable de alta durabilidad en tono neutro cálido para oficinas ejecutivas. Se requiere asesoría técnica para sellado de microfisuras.'
   );
   const [colorTone, setColorTone] = useState('Arena Cálido (Colección Pintuco 2026)');
+  const [selectedColorHex, setSelectedColorHex] = useState('#E28468');
+  const [selectedColorName, setSelectedColorName] = useState('Arena Cálido');
+  const [selectedColorCode, setSelectedColorCode] = useState('PT-248-A');
+  const [showColorWheelModal, setShowColorWheelModal] = useState(false);
   const [finishPreference, setFinishPreference] = useState<'Mate' | 'Satinado' | 'Brillante'>('Mate');
 
   const [isDragging, setIsDragging] = useState(false);
@@ -624,24 +632,77 @@ export const NewRequestForm: React.FC<NewRequestFormProps> = ({
                   ></textarea>
                 </div>
 
-                {/* Color & Finish Selection */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
-                  <div>
-                    <label className="block mb-1.5 text-xs font-bold text-[#725c00] uppercase tracking-wider">
-                      Familia de Color / Tono
-                    </label>
-                    <input
-                      type="text"
-                      value={colorTone}
-                      onChange={(e) => setColorTone(e.target.value)}
-                      placeholder="Ej: Arena Cálido, Blanco Almendra, Gris Titanio"
-                      className="w-full rounded-lg border border-[#d1c6ab] bg-white py-2.5 px-3.5 text-sm text-[#1f1b10] focus:border-[#725c00] focus:ring-1 focus:ring-[#ffd100] outline-hidden"
-                    />
+                {/* Color & Finish Selection with Color Wheel & Code Choice */}
+                <div className="space-y-4 pt-2">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div>
+                      <label className="block text-xs font-bold text-[#725c00] uppercase tracking-wider">
+                        Color / Tono Seleccionado
+                      </label>
+                      <p className="text-xs text-[#7f765f]">
+                        Elige entre sugerencias certificadas Pintuco® o utiliza la rueda de color y código
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setShowColorWheelModal(true)}
+                      className="px-4 py-2 rounded-xl bg-white hover:bg-[#f6eddb] text-[#1f1b10] font-bold text-xs flex items-center justify-center gap-2 border border-[#d1c6ab] shadow-2xs transition-colors cursor-pointer shrink-0"
+                      id="btn-open-wheel-new-request"
+                    >
+                      <Disc className="w-4 h-4 text-[#2f5ea1]" />
+                      <span>Rueda de Color & Código Hex</span>
+                    </button>
                   </div>
 
+                  {/* Selected Color Card Display */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-2xl bg-[#fcf3e0] border border-[#ebe2cf]">
+                    <div className="flex items-center gap-3">
+                      <div
+                        className="w-11 h-11 rounded-xl shadow-inner border border-black/15 shrink-0"
+                        style={{ backgroundColor: selectedColorHex }}
+                      ></div>
+                      <div>
+                        <span className="text-[10px] text-[#7f765f] uppercase font-bold">
+                          Tono Activo:
+                        </span>
+                        <div className="font-bold text-sm text-[#1f1b10]">
+                          {selectedColorName}
+                        </div>
+                        <div className="text-xs font-mono text-[#725c00]">
+                          {selectedColorCode} • {selectedColorHex}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex gap-1.5 overflow-x-auto pb-1">
+                      {PINTUCO_SUGGESTED_COLORS.slice(0, 5).map((col) => {
+                        const isSelected = selectedColorHex.toUpperCase() === col.hex.toUpperCase();
+                        return (
+                          <button
+                            key={col.code}
+                            type="button"
+                            onClick={() => {
+                              setSelectedColorHex(col.hex);
+                              setSelectedColorName(col.name);
+                              setSelectedColorCode(col.code);
+                              setColorTone(`${col.name} (${col.code} • ${col.hex})`);
+                            }}
+                            title={`${col.name} (${col.code})`}
+                            className={`w-7 h-7 rounded-lg border-2 transition-transform hover:scale-110 shrink-0 ${
+                              isSelected ? 'border-[#725c00] ring-2 ring-[#ffd100]' : 'border-black/10'
+                            }`}
+                            style={{ backgroundColor: col.hex }}
+                          />
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Finish Preference */}
                   <div>
                     <label className="block mb-1.5 text-xs font-bold text-[#725c00] uppercase tracking-wider">
-                      Tipo de Acabado
+                      Tipo de Acabado Óptico
                     </label>
                     <div className="flex gap-2">
                       {(['Mate', 'Satinado', 'Brillante'] as const).map((finish) => (
@@ -695,6 +756,25 @@ export const NewRequestForm: React.FC<NewRequestFormProps> = ({
           </form>
         </div>
       </div>
+
+      {/* Modal for selecting color via Suggestion vs Wheel & Code */}
+      {showColorWheelModal && (
+        <ColorSelectorModal
+          isOpen={showColorWheelModal}
+          onClose={() => setShowColorWheelModal(false)}
+          productName="Acabado de Superficie"
+          initialMode="custom_wheel"
+          initialHex={selectedColorHex}
+          initialName={selectedColorName}
+          initialCode={selectedColorCode}
+          onApplyColor={(result: ColorSelectionResult) => {
+            setSelectedColorHex(result.hex);
+            setSelectedColorName(result.name);
+            setSelectedColorCode(result.code);
+            setColorTone(`${result.name} (${result.code} • ${result.hex})`);
+          }}
+        />
+      )}
     </div>
   );
 };

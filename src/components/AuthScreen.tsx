@@ -22,6 +22,7 @@ import {
 
 interface AuthScreenProps {
   initialMode?: 'login' | 'register';
+  reasonBanner?: string;
   onLoginSuccess: (user: UserProfile) => void;
   onNavigateToRequest: () => void;
 }
@@ -71,6 +72,7 @@ export const DEMO_USERS: UserProfile[] = [
 
 export const AuthScreen: React.FC<AuthScreenProps> = ({
   initialMode = 'login',
+  reasonBanner,
   onLoginSuccess,
   onNavigateToRequest,
 }) => {
@@ -272,6 +274,18 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                 : 'Regístrate para formular proyectos, acceder a precios especiales y recibir soporte de ingenieros Pintuco.'}
             </p>
           </div>
+
+          {/* Reason / Required Login Notification Banner */}
+          {reasonBanner && (
+            <div className="mb-6 p-4 rounded-2xl bg-[#fff8e1] border border-[#ffd100] text-[#725c00] flex items-start gap-3 shadow-xs">
+              <div className="w-8 h-8 rounded-full bg-[#ffd100] text-[#725c00] flex items-center justify-center shrink-0 mt-0.5 font-bold">
+                <Lock className="w-4 h-4 text-[#1f1b10]" />
+              </div>
+              <div className="text-sm font-semibold leading-snug">
+                {reasonBanner}
+              </div>
+            </div>
+          )}
 
           {/* Mode Switcher Tabs */}
           <div className="flex bg-[#ebe2cf]/50 p-1.5 rounded-2xl mb-8 border border-[#d1c6ab] max-w-md">

@@ -4,7 +4,10 @@ import {
   ActiveTab,
   Quotation,
   ProductionOrder,
+  QuotationItem,
 } from '../types';
+import { AddProductModal } from './AddProductModal';
+import { ColorSelectorModal, ColorSelectionResult } from './ColorSelectorModal';
 import {
   Sparkles,
   FileText,
@@ -30,6 +33,9 @@ import {
   Truck,
   Paintbrush,
   Sparkle,
+  Palette,
+  PackagePlus,
+  Plus,
 } from 'lucide-react';
 
 interface ColorLinkEcosystemProps {
@@ -37,12 +43,14 @@ interface ColorLinkEcosystemProps {
   onBackToForm: () => void;
   onNavigateToStatus?: () => void;
   onUpdateOrderStatus?: (status: any) => void;
+  onUpdateProject?: (updatedRequest: ProjectRequest) => void;
 }
 
 export const ColorLinkEcosystem: React.FC<ColorLinkEcosystemProps> = ({
   request,
   onBackToForm,
   onNavigateToStatus,
+  onUpdateProject,
 }) => {
   const [activeSubTab, setActiveSubTab] = useState<
     'technical' | 'commercial' | 'inventory' | 'production_qa' | 'ai_chat'
@@ -60,6 +68,67 @@ export const ColorLinkEcosystem: React.FC<ColorLinkEcosystemProps> = ({
   ]);
   const [inputQuestion, setInputQuestion] = useState('');
   const [isTypingAI, setIsTypingAI] = useState(false);
+
+  // Add Product & Color Modals state
+  const [isAddProductOpen, setIsAddProductOpen] = useState(false);
+  const [colorModalItemIndex, setColorModalItemIndex] = useState<number | null>(null);
+
+  const handleAddProduct = (newItem: QuotationItem) => {
+    if (!request.quotation) return;
+    const updatedItems = [...request.quotation.items, newItem];
+    const subtotal = updatedItems.reduce((acc, it) => acc + (it.totalCOP || 0), 0);
+    const discount = Math.round(subtotal * 0.05);
+    const tax = Math.round((subtotal - discount) * 0.19);
+    const labor = request.quotation.laborEstimateCOP || Math.round(request.areaM2 * 6500);
+    const total = subtotal - discount + tax + labor;
+
+    const updatedRequest: ProjectRequest = {
+      ...request,
+      quotation: {
+        ...request.quotation,
+        items: updatedItems,
+        subtotalCOP: subtotal,
+        discountCOP: discount,
+        taxCOP: tax,
+        totalCOP: total,
+      },
+    };
+    if (onUpdateProject) {
+      onUpdateProject(updatedRequest);
+    }
+  };
+
+  const handleApplyColorSelection = (result: ColorSelectionResult) => {
+    if (colorModalItemIndex === null || !request.quotation) return;
+    const targetItem = request.quotation.items[colorModalItemIndex];
+    if (!targetItem) return;
+
+    const baseName = targetItem.name.replace(/\s*\([^)]*\)\s*$/, '').trim();
+    const newName = `${baseName} (${result.name})`;
+
+    const updatedItems = [...request.quotation.items];
+    updatedItems[colorModalItemIndex] = {
+      ...targetItem,
+      name: newName,
+      hasColors: true,
+      selectedColorMode: result.mode,
+      selectedColorName: result.name,
+      selectedColorHex: result.hex,
+      selectedColorCode: result.code,
+    };
+
+    const updatedRequest: ProjectRequest = {
+      ...request,
+      quotation: {
+        ...request.quotation,
+        items: updatedItems,
+      },
+    };
+    if (onUpdateProject) {
+      onUpdateProject(updatedRequest);
+    }
+    setColorModalItemIndex(null);
+  };
 
   const diagnosis = request.diagnosis;
   const quote = request.quotation;
@@ -513,8 +582,24 @@ export const ColorLinkEcosystem: React.FC<ColorLinkEcosystemProps> = ({
               </div>
             </div>
 
+            {/* Itemized Table Header with Add Product CTA */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-6 pb-2">
+              <span className="text-xs font-bold text-[#725c00] uppercase tracking-wider">
+                Desglose de Productos y Servicios ({quote.items.length} ítems)
+              </span>
+              <button
+                type="button"
+                onClick={() => setIsAddProductOpen(true)}
+                className="px-4 py-2 rounded-xl bg-[#ffd100] hover:bg-[#ffc800] text-[#1f1b10] font-black text-xs flex items-center justify-center gap-1.5 shadow-2xs transition-all cursor-pointer self-start sm:self-auto"
+                id="btn-add-product-quote-ecosystem"
+              >
+                <PackagePlus className="w-4 h-4" />
+                <span>+ Agregar Producto al Proyecto</span>
+              </button>
+            </div>
+
             {/* Itemized Table */}
-            <div className="overflow-x-auto py-6">
+            <div className="overflow-x-auto pb-6">
               <table className="w-full text-left text-xs sm:text-sm">
                 <thead>
                   <tr className="border-b-2 border-[#d1c6ab] text-[#725c00] font-bold uppercase tracking-wider text-[11px]">
@@ -531,10 +616,41 @@ export const ColorLinkEcosystem: React.FC<ColorLinkEcosystemProps> = ({
                     <tr key={idx} className="hover:bg-[#fff8f0]/80 transition-colors">
                       <td className="py-3.5 font-mono font-bold text-[#7f765f]">{item.sku}</td>
                       <td className="py-3.5 font-bold text-[#1f1b10]">
-                        {item.name}
+                        <div className="flex items-center gap-2">
+                          <span>{item.name}</span>
+                          {item.isCustomManual && (
+                            <span className="text-[10px] px-2 py-0.5 rounded bg-blue-100 text-blue-800 font-bold">
+                              Obra
+                            </span>
+                          )}
+                        </div>
                         <span className="block text-[11px] font-normal text-[#7f765f]">
                           {item.type}
                         </span>
+
+                        {/* Color selection chip if product has color */}
+                        {item.hasColors && (
+                          <div className="flex items-center gap-2 mt-1.5 p-1.5 rounded-lg bg-[#fcf3e0] border border-[#ebe2cf] w-fit">
+                            <div
+                              className="w-4 h-4 rounded-full border border-black/20 shrink-0"
+                              style={{ backgroundColor: item.selectedColorHex || '#E28468' }}
+                            ></div>
+                            <span className="text-[11px] font-bold text-[#1f1b10]">
+                              {item.selectedColorName || 'Tono Asignado'}
+                            </span>
+                            <span className="text-[10px] font-mono text-[#7f765f]">
+                              {item.selectedColorCode || item.selectedColorHex}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setColorModalItemIndex(idx)}
+                              className="text-[10px] text-[#2f5ea1] hover:underline font-bold flex items-center gap-0.5 ml-1.5 cursor-pointer"
+                            >
+                              <Palette className="w-3 h-3" />
+                              <span>Elegir Color</span>
+                            </button>
+                          </div>
+                        )}
                       </td>
                       <td className="py-3.5 text-[#4d4632]">{item.unit}</td>
                       <td className="py-3.5 text-center font-bold text-[#1f1b10]">{item.quantity}</td>
@@ -888,6 +1004,30 @@ export const ColorLinkEcosystem: React.FC<ColorLinkEcosystemProps> = ({
             </form>
           </div>
         </div>
+      )}
+
+      {/* ===================== MODAL: AGREGAR PRODUCTO AL PROYECTO ===================== */}
+      {isAddProductOpen && (
+        <AddProductModal
+          isOpen={isAddProductOpen}
+          onClose={() => setIsAddProductOpen(false)}
+          onAddProduct={handleAddProduct}
+        />
+      )}
+
+      {/* ===================== MODAL: SELECCIONAR COLOR / RUEDA ===================== */}
+      {colorModalItemIndex !== null && quote?.items[colorModalItemIndex] && (
+        <ColorSelectorModal
+          isOpen={colorModalItemIndex !== null}
+          onClose={() => setColorModalItemIndex(null)}
+          productName={quote.items[colorModalItemIndex].name}
+          productSku={quote.items[colorModalItemIndex].sku}
+          initialMode={quote.items[colorModalItemIndex].selectedColorMode || 'suggestion'}
+          initialHex={quote.items[colorModalItemIndex].selectedColorHex || '#E28468'}
+          initialName={quote.items[colorModalItemIndex].selectedColorName || 'Salmón Terracota'}
+          initialCode={quote.items[colorModalItemIndex].selectedColorCode || 'PT-248-A'}
+          onApplyColor={handleApplyColorSelection}
+        />
       )}
     </div>
   );

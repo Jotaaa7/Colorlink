@@ -88,79 +88,83 @@ export const Header: React.FC<HeaderProps> = ({
             <span className="hidden sm:inline">Servicios</span>
           </button>
 
-          <button
-            onClick={() => setActiveTab('new_request')}
-            className={`px-3.5 sm:px-4 py-2 rounded-xl text-sm font-bold transition-all relative ${
-              activeTab === 'new_request'
-                ? 'text-[#725c00] bg-[#f6eddb] shadow-2xs'
-                : 'text-[#4d4632] hover:text-[#725c00] hover:bg-[#f6eddb]'
-            }`}
-            id="nav-new-request-btn"
-          >
-            <span>Nueva Solicitud</span>
-            {activeTab === 'new_request' && (
-              <span className="absolute bottom-0 left-4 right-4 h-0.5 bg-[#725c00] rounded-full"></span>
-            )}
-          </button>
+          {currentUser ? (
+            <>
+              <button
+                onClick={() => setActiveTab('new_request')}
+                className={`px-3.5 sm:px-4 py-2 rounded-xl text-sm font-bold transition-all relative ${
+                  activeTab === 'new_request'
+                    ? 'text-[#725c00] bg-[#f6eddb] shadow-2xs'
+                    : 'text-[#4d4632] hover:text-[#725c00] hover:bg-[#f6eddb]'
+                }`}
+                id="nav-new-request-btn"
+              >
+                <span>Nueva Solicitud</span>
+                {activeTab === 'new_request' && (
+                  <span className="absolute bottom-0 left-4 right-4 h-0.5 bg-[#725c00] rounded-full"></span>
+                )}
+              </button>
 
-          <button
-            onClick={() => setActiveTab('project_status')}
-            className={`px-3.5 py-2 rounded-xl text-sm font-bold transition-all flex items-center gap-1.5 relative ${
-              activeTab === 'project_status'
-                ? 'text-[#725c00] bg-[#f6eddb] shadow-2xs'
-                : 'text-[#4d4632] hover:text-[#725c00] hover:bg-[#f6eddb]'
-            }`}
-            id="nav-project-status-btn"
-          >
-            <Clock className="w-4 h-4 text-[#edc200]" />
-            <span className="hidden sm:inline">Estado del Proyecto</span>
-            <span className="sm:hidden">Seguimiento</span>
-            {activeTab === 'project_status' && (
-              <span className="absolute bottom-0 left-4 right-4 h-0.5 bg-[#725c00] rounded-full"></span>
-            )}
-          </button>
+              <button
+                onClick={() => setActiveTab('project_status')}
+                className={`px-3.5 py-2 rounded-xl text-sm font-bold transition-all flex items-center gap-1.5 relative ${
+                  activeTab === 'project_status'
+                    ? 'text-[#725c00] bg-[#f6eddb] shadow-2xs'
+                    : 'text-[#4d4632] hover:text-[#725c00] hover:bg-[#f6eddb]'
+                }`}
+                id="nav-project-status-btn"
+              >
+                <Clock className="w-4 h-4 text-[#edc200]" />
+                <span className="hidden sm:inline">Estado del Proyecto</span>
+                <span className="sm:hidden">Seguimiento</span>
+                {activeTab === 'project_status' && (
+                  <span className="absolute bottom-0 left-4 right-4 h-0.5 bg-[#725c00] rounded-full"></span>
+                )}
+              </button>
 
-          <button
-            onClick={() => setActiveTab('advisor_portal')}
-            className={`px-3.5 py-2 rounded-xl text-sm font-bold transition-all flex items-center gap-1.5 relative ${
-              activeTab === 'advisor_portal'
-                ? 'text-[#725c00] bg-[#f6eddb] shadow-2xs'
-                : 'text-[#4d4632] hover:text-[#725c00] hover:bg-[#f6eddb]'
-            }`}
-            id="nav-advisor-portal-btn"
-          >
-            <ShieldCheck className="w-4 h-4 text-[#725c00]" />
-            <span className="hidden sm:inline">Portal Asesor</span>
-            <span className="sm:hidden">Asesor</span>
-            <span className="text-[10px] font-black px-1.5 py-0.5 bg-[#ffd100] text-[#6f5a00] rounded-sm tracking-wider">
-              PRO
-            </span>
-            {(activeTab === 'advisor_portal' || activeTab === 'advisor_inventory') && (
-              <span className="absolute bottom-0 left-4 right-4 h-0.5 bg-[#725c00] rounded-full"></span>
-            )}
-          </button>
+              <button
+                onClick={() => setActiveTab('advisor_portal')}
+                className={`px-3.5 py-2 rounded-xl text-sm font-bold transition-all flex items-center gap-1.5 relative ${
+                  activeTab === 'advisor_portal'
+                    ? 'text-[#725c00] bg-[#f6eddb] shadow-2xs'
+                    : 'text-[#4d4632] hover:text-[#725c00] hover:bg-[#f6eddb]'
+                }`}
+                id="nav-advisor-portal-btn"
+              >
+                <ShieldCheck className="w-4 h-4 text-[#725c00]" />
+                <span className="hidden sm:inline">Portal Asesor</span>
+                <span className="sm:hidden">Asesor</span>
+                <span className="text-[10px] font-black px-1.5 py-0.5 bg-[#ffd100] text-[#6f5a00] rounded-sm tracking-wider">
+                  PRO
+                </span>
+                {(activeTab === 'advisor_portal' || activeTab === 'advisor_inventory') && (
+                  <span className="absolute bottom-0 left-4 right-4 h-0.5 bg-[#725c00] rounded-full"></span>
+                )}
+              </button>
 
-          <button
-            onClick={() => setActiveTab('ecosystem_hub')}
-            className={`px-3.5 py-2 rounded-xl text-sm font-bold transition-all flex items-center gap-1.5 relative ${
-              activeTab === 'ecosystem_hub' ||
-              activeTab === 'technical_diagnosis' ||
-              activeTab === 'commercial_quote' ||
-              activeTab === 'inventory_plants' ||
-              activeTab === 'production_qa' ||
-              activeTab === 'ai_consultant'
-                ? 'text-[#2f5ea1] bg-[#e1edff] shadow-2xs'
-                : 'text-[#4d4632] hover:text-[#2f5ea1] hover:bg-[#f6eddb]'
-            }`}
-            id="nav-ecosystem-btn"
-          >
-            <Sparkles className="w-4 h-4 text-[#2f5ea1]" />
-            <span className="hidden md:inline">Ecosistema ColorLink</span>
-            <span className="md:hidden">Ecosistema</span>
-            {currentRequest && (
-              <span className="w-2 h-2 rounded-full bg-[#ffd100] ring-2 ring-white"></span>
-            )}
-          </button>
+              {currentRequest && (
+                <button
+                  onClick={() => setActiveTab('ecosystem_hub')}
+                  className={`px-3.5 py-2 rounded-xl text-sm font-bold transition-all flex items-center gap-1.5 relative ${
+                    activeTab === 'ecosystem_hub' ||
+                    activeTab === 'technical_diagnosis' ||
+                    activeTab === 'commercial_quote' ||
+                    activeTab === 'inventory_plants' ||
+                    activeTab === 'production_qa' ||
+                    activeTab === 'ai_consultant'
+                      ? 'text-[#2f5ea1] bg-[#e1edff] shadow-2xs'
+                      : 'text-[#4d4632] hover:text-[#2f5ea1] hover:bg-[#f6eddb]'
+                  }`}
+                  id="nav-ecosystem-btn"
+                >
+                  <Sparkles className="w-4 h-4 text-[#2f5ea1]" />
+                  <span className="hidden md:inline">Ecosistema ColorLink</span>
+                  <span className="md:hidden">Ecosistema</span>
+                  <span className="w-2 h-2 rounded-full bg-[#ffd100] ring-2 ring-white"></span>
+                </button>
+              )}
+            </>
+          ) : null}
         </nav>
 
         {/* User Profile / Auth Actions & Soporte */}

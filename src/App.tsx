@@ -20,8 +20,6 @@ import {
 import { isSupabaseConfigured } from './lib/supabase';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<ActiveTab>('new_request');
-  const [supabaseConnected, setSupabaseConnected] = useState<boolean | null>(null);
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => {
     try {
       const saved = localStorage.getItem('colorlink_user');
@@ -29,8 +27,20 @@ export default function App() {
     } catch {
       // ignore
     }
-    return DEMO_USERS[0]; // Default to Demo User (Constructora Andina) for immediate seamless experience
+    return null; // User must log in first
   });
+
+  const [activeTab, setActiveTab] = useState<ActiveTab>(() => {
+    try {
+      const saved = localStorage.getItem('colorlink_user');
+      if (saved) return 'new_request';
+    } catch {
+      // ignore
+    }
+    return 'login';
+  });
+
+  const [supabaseConnected, setSupabaseConnected] = useState<boolean | null>(null);
 
   const [currentRequest, setCurrentRequest] = useState<ProjectRequest | null>(INITIAL_DEMO_REQUEST);
   const [isProcessingAI, setIsProcessingAI] = useState(false);
@@ -232,6 +242,13 @@ export default function App() {
     }
   };
 
+  const handleUpdateProjectRequest = (updatedRequest: ProjectRequest) => {
+    setCurrentRequest(updatedRequest);
+    saveRemoteProjectRequest(updatedRequest).catch((err) =>
+      console.warn('Supabase update notice:', err)
+    );
+  };
+
   return (
     <div className="min-h-screen bg-[#fff8f0] text-[#1f1b10] flex flex-col font-sans">
       {/* Top Navbar */}
@@ -248,7 +265,19 @@ export default function App() {
 
       {/* Main Content Body */}
       <main className="flex-grow">
-        {activeTab === 'login' ? (
+        {!currentUser ? (
+          /* Authentication Required Wall for New Request and Project Status */
+          <AuthScreen
+            initialMode={activeTab === 'register' ? 'register' : 'login'}
+            reasonBanner={
+              activeTab === 'new_request' || activeTab === 'project_status'
+                ? 'Para acceder a Nueva Solicitud o consultar el Estado de tu Proyecto, por favor inicia sesión o regístrate en Pintuco ColorLink.'
+                : undefined
+            }
+            onLoginSuccess={handleLoginSuccess}
+            onNavigateToRequest={() => setActiveTab('new_request')}
+          />
+        ) : activeTab === 'login' ? (
           <AuthScreen
             initialMode="login"
             onLoginSuccess={handleLoginSuccess}
@@ -267,6 +296,7 @@ export default function App() {
             onNavigateToEcosystem={() => setActiveTab('ecosystem_hub')}
             onOpenSupport={() => setIsSupportOpen(true)}
             onNavigateToAdvisorPortal={() => setActiveTab('advisor_portal')}
+            onUpdateProject={handleUpdateProjectRequest}
           />
         ) : activeTab === 'advisor_portal' ? (
           <AdvisorEvaluationScreen
@@ -298,6 +328,7 @@ export default function App() {
               request={currentRequest}
               onBackToForm={() => setActiveTab('new_request')}
               onNavigateToStatus={() => setActiveTab('project_status')}
+              onUpdateProject={handleUpdateProjectRequest}
             />
           )
         )}
@@ -313,7 +344,7 @@ export default function App() {
       <ServicesModal
         isOpen={isServicesOpen}
         onClose={() => setIsServicesOpen(false)}
-        onSelectService={() => setActiveTab('new_request')}
+        onSelectService={() => setActiveTab(currentUser ? 'new_request' : 'login')}
       />
 
       <SupportModal

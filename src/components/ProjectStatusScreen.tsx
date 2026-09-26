@@ -1,5 +1,7 @@
-import React, { useState } from 'react';
-import { ProjectRequest } from '../types';
+import React, { useState, useEffect } from 'react';
+import { ProjectRequest, QuotationItem } from '../types';
+import { ColorSelectorModal, ColorSelectionResult } from './ColorSelectorModal';
+import { AddProductModal } from './AddProductModal';
 import {
   Calendar,
   Clock,
@@ -23,6 +25,12 @@ import {
   Star,
   Download,
   AlertCircle,
+  Palette,
+  Disc,
+  Plus,
+  Trash2,
+  PackagePlus,
+  Edit3,
 } from 'lucide-react';
 
 interface ProjectStatusScreenProps {
@@ -31,6 +39,7 @@ interface ProjectStatusScreenProps {
   onNavigateToEcosystem: () => void;
   onOpenSupport: () => void;
   onNavigateToAdvisorPortal?: () => void;
+  onUpdateProject?: (updatedRequest: ProjectRequest) => void;
 }
 
 export const ProjectStatusScreen: React.FC<ProjectStatusScreenProps> = ({
@@ -39,6 +48,7 @@ export const ProjectStatusScreen: React.FC<ProjectStatusScreenProps> = ({
   onNavigateToEcosystem,
   onOpenSupport,
   onNavigateToAdvisorPortal,
+  onUpdateProject,
 }) => {
   // Photos Gallery state
   const photos = [
@@ -76,6 +86,142 @@ export const ProjectStatusScreen: React.FC<ProjectStatusScreenProps> = ({
   const [showFullExpedienteModal, setShowFullExpedienteModal] = useState(false);
   const [showFichaTecnicaModal, setShowFichaTecnicaModal] = useState(false);
   const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
+
+  // Products and Color State
+  const defaultItems: QuotationItem[] = [
+    {
+      sku: 'PT-VX-1010',
+      name: 'Viniltex® Avanzado Antibacterial (Tono Salmón Terracota)',
+      type: 'Pintura Acabado',
+      unit: 'Caneca (5 Gal) x 2 + Galón x 1',
+      quantity: 11,
+      unitPriceCOP: 94500,
+      totalCOP: 1039500,
+      hasColors: true,
+      selectedColorMode: 'suggestion',
+      selectedColorName: 'Salmón Terracota',
+      selectedColorHex: '#E28468',
+      selectedColorCode: 'PT-248-A',
+      finishPreference: 'Mate',
+    },
+    {
+      sku: 'PT-SM-2005',
+      name: 'Sellomax® Imprimante y Sellador Acrílico',
+      type: 'Imprimante',
+      unit: 'Caneca (5 Gal)',
+      quantity: 5,
+      unitPriceCOP: 62000,
+      totalCOP: 310000,
+      hasColors: false,
+    },
+    {
+      sku: 'ACC-KIT-PRO',
+      name: 'Kit Profesional de Aplicación Pintuco (2 Rodillos + 2 Brochas + Bandeja)',
+      type: 'Herramientas',
+      unit: 'Kit',
+      quantity: 2,
+      unitPriceCOP: 48000,
+      totalCOP: 96000,
+      hasColors: false,
+    },
+  ];
+
+  const [projectItems, setProjectItems] = useState<QuotationItem[]>(
+    request?.quotation?.items && request.quotation.items.length > 0
+      ? request.quotation.items
+      : defaultItems
+  );
+
+  const [isAddProductModalOpen, setIsAddProductModalOpen] = useState(false);
+  const [colorModalTargetIndex, setColorModalTargetIndex] = useState<number | null>(null);
+
+  // Sync when request changes
+  useEffect(() => {
+    if (request?.quotation?.items && request.quotation.items.length > 0) {
+      setProjectItems(request.quotation.items);
+    }
+  }, [request?.quotation?.items]);
+
+  // Sync project update helper
+  const syncProjectUpdate = (newItems: QuotationItem[]) => {
+    if (!request) return;
+    const subtotal = newItems.reduce((acc, it) => acc + (it.totalCOP || 0), 0);
+    const discount = Math.round(subtotal * 0.05);
+    const tax = Math.round((subtotal - discount) * 0.19);
+    const labor = request.quotation?.laborEstimateCOP || Math.round((request.areaM2 || 45) * 6500);
+    const total = subtotal - discount + tax + labor;
+
+    const updatedRequest: ProjectRequest = {
+      ...request,
+      quotation: {
+        quoteNumber: request.quotation?.quoteNumber || `COT-PT-${new Date().getFullYear()}-01`,
+        date: request.quotation?.date || new Date().toLocaleDateString('es-CO'),
+        validUntil: request.quotation?.validUntil || '15 días',
+        items: newItems,
+        subtotalCOP: subtotal,
+        discountCOP: discount,
+        taxCOP: tax,
+        laborEstimateCOP: labor,
+        logisticsCOP: 0,
+        totalCOP: total,
+        paymentTerms: request.quotation?.paymentTerms || 'Crédito Corporativo 30 días / PSE',
+        estimatedLeadDays: request.quotation?.estimatedLeadDays || 2,
+      },
+    };
+
+    if (onUpdateProject) {
+      onUpdateProject(updatedRequest);
+    }
+  };
+
+  // Add product handler
+  const handleAddProduct = (newItem: QuotationItem) => {
+    const updated = [...projectItems, newItem];
+    setProjectItems(updated);
+    syncProjectUpdate(updated);
+  };
+
+  // Remove product handler
+  const handleRemoveProduct = (indexToRemove: number) => {
+    const updated = projectItems.filter((_, idx) => idx !== indexToRemove);
+    setProjectItems(updated);
+    syncProjectUpdate(updated);
+  };
+
+  // Apply color selection handler
+  const handleApplyColorSelection = (result: ColorSelectionResult) => {
+    if (colorModalTargetIndex === null) return;
+    const targetItem = projectItems[colorModalTargetIndex];
+    if (!targetItem) return;
+
+    // Clean base name
+    const baseName = targetItem.name.replace(/\s*\([^)]*\)\s*$/, '').trim();
+    const newName = `${baseName} (${result.name})`;
+
+    const updated = [...projectItems];
+    updated[colorModalTargetIndex] = {
+      ...targetItem,
+      name: newName,
+      hasColors: true,
+      selectedColorMode: result.mode,
+      selectedColorName: result.name,
+      selectedColorHex: result.hex,
+      selectedColorCode: result.code,
+    };
+
+    setProjectItems(updated);
+    syncProjectUpdate(updated);
+    setColorModalTargetIndex(null);
+  };
+
+  // Format COP Currency
+  const formatCOP = (val: number) => {
+    return new Intl.NumberFormat('es-CO', {
+      style: 'currency',
+      currency: 'COP',
+      maximumFractionDigits: 0,
+    }).format(val);
+  };
 
   // Derived project values or fallbacks matching mockup
   const projectCode = request?.id || 'PTC-2024-8924';
@@ -418,31 +564,55 @@ export const ProjectStatusScreen: React.FC<ProjectStatusScreenProps> = ({
             </button>
           </div>
 
-          {/* Technical Specifications Card */}
-          <div className="bg-white rounded-2xl shadow-xs border border-[#ebe2cf] p-6 md:p-8">
-            <div className="flex items-center gap-2.5 mb-6">
-              <Package className="w-6 h-6 text-[#2f5ea1]" />
-              <h3 className="text-xl sm:text-2xl font-black text-[#1f1b10]">
-                Producto Sugerido & Especificaciones
-              </h3>
+          {/* Interactive Products & Materials of the Project */}
+          <div className="bg-white rounded-2xl shadow-xs border border-[#ebe2cf] p-6 md:p-8 space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-[#ebe2cf]">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-[#ffd100]/30 text-[#725c00] flex items-center justify-center font-bold">
+                  <Package className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-xl sm:text-2xl font-black text-[#1f1b10]">
+                      Productos & Recubrimientos
+                    </h3>
+                    <span className="px-2.5 py-0.5 rounded-full bg-[#f6eddb] text-[#725c00] text-xs font-bold">
+                      {projectItems.length} {projectItems.length === 1 ? 'ítem' : 'ítems'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-[#7f765f]">
+                    Materiales certificados Pintuco® asignados a tu obra
+                  </p>
+                </div>
+              </div>
+
+              {/* Add Product Manually Button */}
+              <button
+                type="button"
+                onClick={() => setIsAddProductModalOpen(true)}
+                className="inline-flex items-center justify-center gap-2 bg-[#ffd100] hover:bg-[#ffc800] text-[#1f1b10] font-black text-xs px-4 py-2.5 rounded-full shadow-2xs hover:shadow-xs transition-all cursor-pointer"
+                id="btn-add-product-project-status"
+              >
+                <PackagePlus className="w-4 h-4" />
+                <span>+ Agregar Producto al Proyecto</span>
+              </button>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
-              {/* Spec 1: Superficie y Rendimiento */}
+            {/* Quick Specs: Area & Prescribed System */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="p-4 rounded-xl bg-[#fcf3e0] border border-[#ebe2cf] flex flex-col justify-between">
                 <span className="text-[11px] text-[#4d4632] uppercase font-bold tracking-wider">
                   Cálculo de Área y Volumen
                 </span>
                 <div className="flex items-baseline gap-2 mt-2">
                   <span className="text-2xl font-black text-[#1f1b10]">{projectArea} m²</span>
-                  <span className="text-xs text-[#2f5ea1] font-bold">2.5 Galones estimados</span>
+                  <span className="text-xs text-[#2f5ea1] font-bold">Rendimiento óptimo</span>
                 </div>
                 <p className="text-xs text-[#7f765f] mt-1.5">
-                  2 manos de acabado con rendimiento de 18-20 m²/gal
+                  2 manos de acabado con rendimiento de 18-22 m²/gal
                 </p>
               </div>
 
-              {/* Spec 2: Sistema Recomendado */}
               <div className="p-4 rounded-xl bg-[#fcf3e0] border border-[#ebe2cf] flex flex-col justify-between">
                 <span className="text-[11px] text-[#4d4632] uppercase font-bold tracking-wider">
                   Sistema de Pintura Prescrito
@@ -452,49 +622,153 @@ export const ProjectStatusScreen: React.FC<ProjectStatusScreenProps> = ({
                     Viniltex Avanzado Antibacterial
                   </p>
                   <p className="text-xs text-[#2f5ea1] font-bold">
-                    + Sellador Acrílico Antihumedad 501
+                    + Sellador Acrílico Sellomax®
                   </p>
                 </div>
                 <p className="text-xs text-[#7f765f] mt-1.5">
-                  Fórmula Lavable, Cero Olor & Antihongos
+                  Fórmula Lavable, Cero Olor & Antihongos Bio-Pruf
                 </p>
               </div>
             </div>
 
-            {/* Color Palette Detail Swatches */}
-            <div className="p-4 rounded-xl bg-[#fcf3e0] border border-[#ebe2cf] mb-6">
-              <p className="text-xs font-bold text-[#1f1b10] uppercase tracking-wider mb-3">
-                Paleta de Color Pintuco® Formulada:
-              </p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {/* Swatch 1 */}
-                <div className="flex items-center gap-3 bg-white p-3 rounded-xl shadow-2xs border border-[#ebe2cf]">
-                  <div
-                    className="w-12 h-12 rounded-lg shadow-inner shrink-0 border border-black/10"
-                    style={{ backgroundColor: '#E28468' }}
-                  ></div>
-                  <div>
-                    <p className="text-sm font-bold text-[#1f1b10]">Salmón Terracota</p>
-                    <p className="text-xs text-[#7f765f]">1 Galón • Código Pintuco 248-A</p>
-                  </div>
-                </div>
+            {/* Itemized Products Cards List */}
+            <div className="space-y-3.5">
+              <div className="flex items-center justify-between text-xs font-bold text-[#725c00] uppercase tracking-wider">
+                <span>Materiales incluidos en el proyecto</span>
+                <span>Subtotal / Acción</span>
+              </div>
 
-                {/* Swatch 2 */}
-                <div className="flex items-center gap-3 bg-white p-3 rounded-xl shadow-2xs border border-[#ebe2cf]">
+              {projectItems.map((item, idx) => {
+                const hasColor = item.hasColors;
+                const colorHex = item.selectedColorHex || '#E28468';
+                const colorName = item.selectedColorName || 'Salmón Terracota';
+                const colorCode = item.selectedColorCode || 'PT-248-A';
+
+                return (
                   <div
-                    className="w-12 h-12 rounded-lg shadow-inner shrink-0 border border-black/15"
-                    style={{ backgroundColor: '#FAF6EE' }}
-                  ></div>
-                  <div>
-                    <p className="text-sm font-bold text-[#1f1b10]">Blanco Lienzo</p>
-                    <p className="text-xs text-[#7f765f]">2 Galones • Código Pintuco 100-B</p>
+                    key={`${item.sku}-${idx}`}
+                    className="p-4 rounded-2xl border border-[#ebe2cf] bg-white hover:border-[#d1c6ab] transition-all shadow-2xs space-y-3"
+                  >
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div className="flex items-start gap-3">
+                        <div className="w-9 h-9 rounded-xl bg-[#f6eddb] text-[#725c00] flex items-center justify-center font-bold text-xs shrink-0 mt-0.5">
+                          {idx + 1}
+                        </div>
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2 mb-0.5">
+                            <span className="text-xs font-mono font-bold text-[#7f765f]">
+                              {item.sku}
+                            </span>
+                            <span className="text-[10px] px-2 py-0.5 rounded-md bg-[#f6eddb] text-[#725c00] font-bold uppercase">
+                              {item.type}
+                            </span>
+                            {item.isCustomManual && (
+                              <span className="text-[10px] px-2 py-0.5 rounded-md bg-blue-100 text-blue-800 font-bold">
+                                Manual / Obra
+                              </span>
+                            )}
+                          </div>
+                          <h4 className="font-bold text-sm sm:text-base text-[#1f1b10] leading-snug">
+                            {item.name}
+                          </h4>
+                          <p className="text-xs text-[#4d4632]">
+                            Presentación: <strong>{item.unit}</strong> • Cantidad: <strong>{item.quantity}</strong>
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between sm:flex-col sm:items-end gap-1 shrink-0 pt-2 sm:pt-0 border-t sm:border-0 border-[#ebe2cf]">
+                        <span className="font-black text-base text-[#1f1b10]">
+                          {formatCOP(item.totalCOP)}
+                        </span>
+                        <span className="text-[11px] text-[#7f765f]">
+                          {formatCOP(item.unitPriceCOP)} c/u
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Color Configuration Section for items that have colors */}
+                    {hasColor ? (
+                      <div className="p-3 rounded-xl bg-[#fcf3e0] border border-[#ebe2cf] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                          <div
+                            className="w-9 h-9 rounded-lg shadow-inner border border-black/15 shrink-0"
+                            style={{ backgroundColor: colorHex }}
+                          ></div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-bold text-[#1f1b10]">
+                                {colorName}
+                              </span>
+                              <span className="text-[10px] font-mono font-bold text-[#2f5ea1] bg-white px-1.5 py-0.5 rounded border border-[#d1c6ab]/40">
+                                {colorCode}
+                              </span>
+                              <span className="text-[10px] font-mono text-[#7f765f]">
+                                {colorHex}
+                              </span>
+                            </div>
+                            <span className="text-[11px] text-[#725c00]">
+                              {item.selectedColorMode === 'custom_wheel'
+                                ? 'Personalizado vía Rueda de Color & Código'
+                                : 'Sugerencia de Color Pintuco® Certificada'}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Button to choose between suggestion or color wheel */}
+                        <button
+                          type="button"
+                          onClick={() => setColorModalTargetIndex(idx)}
+                          className="px-3.5 py-2 rounded-xl bg-white hover:bg-[#ebe2cf] text-[#1f1b10] font-bold text-xs flex items-center justify-center gap-1.5 border border-[#d1c6ab] shadow-2xs transition-colors cursor-pointer shrink-0"
+                          id={`btn-edit-color-${idx}`}
+                        >
+                          <Palette className="w-3.5 h-3.5 text-[#725c00]" />
+                          <span>Elegir / Cambiar Color</span>
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-between text-xs text-[#7f765f] pt-1">
+                        <span className="italic">
+                          Fórmula incolora / acabado transparente o accesorio estándar
+                        </span>
+                        {item.isCustomManual && (
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveProduct(idx)}
+                            className="text-rose-600 hover:text-rose-800 font-bold flex items-center gap-1 cursor-pointer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span>Quitar ítem</span>
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
-                </div>
+                );
+              })}
+            </div>
+
+            {/* Bottom Add Product Action Banner */}
+            <div className="pt-2 flex flex-col sm:flex-row items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={() => setIsAddProductModalOpen(true)}
+                className="w-full sm:w-auto py-3 px-6 rounded-2xl bg-[#f6eddb] hover:bg-[#ebe2cf] text-[#1f1b10] text-xs sm:text-sm font-bold flex items-center justify-center gap-2 transition-colors border border-[#d1c6ab] cursor-pointer"
+              >
+                <Plus className="w-4 h-4 text-[#725c00]" />
+                <span>+ Agregar otro producto o insumo manualmente</span>
+              </button>
+
+              <div className="text-right text-xs text-[#4d4632]">
+                <span>Total Materiales Estimado: </span>
+                <strong className="text-[#1f1b10] text-base font-black ml-1">
+                  {formatCOP(projectItems.reduce((acc, it) => acc + (it.totalCOP || 0), 0))}
+                </strong>
               </div>
             </div>
 
             {/* Delivery Address Metadata */}
-            <div className="flex items-center gap-3 text-[#4d4632] text-xs pt-2 border-t border-[#ebe2cf]">
+            <div className="flex items-center gap-3 text-[#4d4632] text-xs pt-4 border-t border-[#ebe2cf]">
               <Truck className="w-4 h-4 text-[#7f765f] shrink-0" />
               <span>
                 Dirección de Despacho Registrada:{' '}
@@ -841,6 +1115,30 @@ export const ProjectStatusScreen: React.FC<ProjectStatusScreenProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* ===================== MODAL: AGREGAR PRODUCTO MANUALMENTE ===================== */}
+      {isAddProductModalOpen && (
+        <AddProductModal
+          isOpen={isAddProductModalOpen}
+          onClose={() => setIsAddProductModalOpen(false)}
+          onAddProduct={handleAddProduct}
+        />
+      )}
+
+      {/* ===================== MODAL: RUEDA DE COLOR & CÓDIGO / SUGERENCIA ===================== */}
+      {colorModalTargetIndex !== null && projectItems[colorModalTargetIndex] && (
+        <ColorSelectorModal
+          isOpen={colorModalTargetIndex !== null}
+          onClose={() => setColorModalTargetIndex(null)}
+          productName={projectItems[colorModalTargetIndex].name}
+          productSku={projectItems[colorModalTargetIndex].sku}
+          initialMode={projectItems[colorModalTargetIndex].selectedColorMode || 'suggestion'}
+          initialHex={projectItems[colorModalTargetIndex].selectedColorHex || '#E28468'}
+          initialName={projectItems[colorModalTargetIndex].selectedColorName || 'Salmón Terracota'}
+          initialCode={projectItems[colorModalTargetIndex].selectedColorCode || 'PT-248-A'}
+          onApplyColor={handleApplyColorSelection}
+        />
       )}
     </div>
   );
