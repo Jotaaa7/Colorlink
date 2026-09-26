@@ -131,18 +131,52 @@ export default function App() {
       const data = await response.json();
       const diagnosis: AIDiagnosis = data.diagnosis;
 
-      // Generate matching commercial quotation
-      const quoteItems = diagnosis.recommendedProducts.map((p) => ({
-        sku: p.sku,
-        name: p.name,
-        type: p.type,
-        unit: p.totalGallonsNeeded >= 5
-          ? `Caneca (5 Gal) x ${Math.floor(p.totalGallonsNeeded / 5)} + Gal x ${Math.ceil(p.totalGallonsNeeded % 5)}`
-          : `Galón (${p.totalGallonsNeeded} Gal)`,
-        quantity: p.totalGallonsNeeded,
-        unitPriceCOP: Math.round(p.estimatedCostCOP / Math.max(1, p.totalGallonsNeeded)),
-        totalCOP: p.estimatedCostCOP,
-      }));
+      // Generate matching commercial quotation with color specifications
+      const quoteItems = diagnosis.recommendedProducts.map((p, idx) => {
+        const isPaintWithColor =
+          idx === 0 ||
+          p.type.toLowerCase().includes('acabado') ||
+          p.name.toLowerCase().includes('viniltex') ||
+          p.name.toLowerCase().includes('koraza') ||
+          p.name.toLowerCase().includes('pintulux') ||
+          p.name.toLowerCase().includes('tráfico');
+
+        const selectedColorName = isPaintWithColor
+          ? rawRequest.selectedColorName || rawRequest.colorFamily || 'Arena Cálido'
+          : undefined;
+        const selectedColorHex = isPaintWithColor
+          ? rawRequest.selectedColorHex || '#E28468'
+          : undefined;
+        const selectedColorCode = isPaintWithColor
+          ? rawRequest.selectedColorCode || 'PT-102'
+          : undefined;
+        const selectedColorMode = isPaintWithColor
+          ? rawRequest.selectedColorMode || 'suggestion'
+          : undefined;
+
+        const displayName = isPaintWithColor && selectedColorName
+          ? `${p.name} (Tono ${selectedColorName})`
+          : p.name;
+
+        return {
+          sku: p.sku,
+          name: displayName,
+          type: p.type,
+          unit:
+            p.totalGallonsNeeded >= 5
+              ? `Caneca (5 Gal) x ${Math.floor(p.totalGallonsNeeded / 5)} + Gal x ${Math.ceil(p.totalGallonsNeeded % 5)}`
+              : `Galón (${p.totalGallonsNeeded} Gal)`,
+          quantity: p.totalGallonsNeeded,
+          unitPriceCOP: Math.round(p.estimatedCostCOP / Math.max(1, p.totalGallonsNeeded)),
+          totalCOP: p.estimatedCostCOP,
+          hasColors: isPaintWithColor,
+          selectedColorMode,
+          selectedColorName,
+          selectedColorHex,
+          selectedColorCode,
+          finishPreference: rawRequest.finishPreference || 'Mate',
+        };
+      });
 
       const subtotal = quoteItems.reduce((acc, curr) => acc + curr.totalCOP, 0);
       const discount = Math.round(subtotal * 0.05); // 5% ColorLink ecosystem discount
@@ -167,7 +201,7 @@ export default function App() {
 
       const completedRequest: ProjectRequest = {
         ...rawRequest,
-        status: 'Aprobada QA',
+        status: 'Cotizada',
         diagnosis,
         quotation,
         plantStocks: [
@@ -231,12 +265,12 @@ export default function App() {
       saveRemoteProjectRequest(completedRequest).catch((err) =>
         console.warn('Supabase request save notice:', err)
       );
-      setActiveTab('ecosystem_hub');
+      setActiveTab('project_status');
     } catch (error) {
       console.error('Error submitting request:', error);
       // Fallback transition
       setCurrentRequest(rawRequest);
-      setActiveTab('ecosystem_hub');
+      setActiveTab('project_status');
     } finally {
       setIsProcessingAI(false);
     }
@@ -306,6 +340,7 @@ export default function App() {
             onOpenLogin={() => setActiveTab('login')}
             onNavigateHome={() => setActiveTab('new_request')}
             onNavigateToInventory={() => setActiveTab('advisor_inventory')}
+            onUpdateProject={handleUpdateProjectRequest}
           />
         ) : activeTab === 'advisor_inventory' ? (
           <AdvisorInventoryScreen
@@ -315,6 +350,7 @@ export default function App() {
             onOpenLogin={() => setActiveTab('login')}
             onNavigateHome={() => setActiveTab('new_request')}
             onNavigateToDiagnosis={() => setActiveTab('advisor_portal')}
+            onUpdateProject={handleUpdateProjectRequest}
           />
         ) : activeTab === 'new_request' ? (
           <NewRequestForm

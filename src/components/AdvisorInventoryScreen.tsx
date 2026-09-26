@@ -43,6 +43,7 @@ interface AdvisorInventoryScreenProps {
   onOpenLogin: () => void;
   onNavigateHome: () => void;
   onNavigateToDiagnosis?: () => void;
+  onUpdateProject?: (updatedRequest: ProjectRequest) => void;
 }
 
 interface ProductItem {
@@ -82,6 +83,7 @@ export const AdvisorInventoryScreen: React.FC<AdvisorInventoryScreenProps> = ({
   onOpenLogin,
   onNavigateHome,
   onNavigateToDiagnosis,
+  onUpdateProject,
 }) => {
   // Check authorization (RBAC)
   const isAuthorized =
@@ -328,6 +330,14 @@ export const AdvisorInventoryScreen: React.FC<AdvisorInventoryScreenProps> = ({
       items: reservedItems,
       expiresInHours: 48,
     }).catch((err) => console.warn('Supabase reservation async save notice:', err));
+
+    if (request && onUpdateProject) {
+      onUpdateProject({
+        ...request,
+        status: 'Inventario Asignado',
+        approvedAt: request.approvedAt || new Date().toISOString(),
+      });
+    }
 
     setTimeout(() => {
       setIsConfirmingRes(false);
@@ -1214,6 +1224,31 @@ export const AdvisorInventoryScreen: React.FC<AdvisorInventoryScreenProps> = ({
                     </>
                   )}
                 </button>
+
+                {isReservedSuccess && request?.status !== 'Completada' && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (request && onUpdateProject) {
+                        onUpdateProject({
+                          ...request,
+                          status: 'Completada',
+                          deliveryDate: new Date().toLocaleDateString('es-CO'),
+                          trackingNumber:
+                            request.trackingNumber ||
+                            `PTC-TRK-${Math.floor(100000 + Math.random() * 900000)}`,
+                          assignedCarrier: 'Flota Logística Pintuco Express (CEDI Funza)',
+                          completedAt: new Date().toISOString(),
+                        });
+                        triggerToast('¡Despacho express a obra confirmado y orden entregada!', 'check');
+                      }
+                    }}
+                    className="w-full mt-2 py-3 bg-[#ffd100] hover:bg-[#ffc800] text-[#0d4788] text-xs font-black rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer shadow-xs"
+                  >
+                    <Truck className="w-4 h-4 text-[#0d4788]" />
+                    <span>Autorizar Despacho y Entrega en Obra</span>
+                  </button>
+                )}
 
                 <button
                   type="button"

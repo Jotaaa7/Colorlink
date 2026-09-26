@@ -719,6 +719,31 @@ export const ColorLinkEcosystem: React.FC<ColorLinkEcosystemProps> = ({
                   <span>Total Cotización:</span>
                   <span className="text-[#725c00]">{formatCOP(quote.totalCOP)}</span>
                 </div>
+
+                {/* Workflow advance action from quote to production */}
+                {request.status === 'Cotizada' && (
+                  <div className="pt-3">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (onUpdateProject) {
+                          onUpdateProject({
+                            ...request,
+                            status: 'Inventario Asignado',
+                            approvedAt: new Date().toISOString(),
+                          });
+                        }
+                        if (onNavigateToStatus) {
+                          onNavigateToStatus();
+                        }
+                      }}
+                      className="w-full py-3 px-4 rounded-xl bg-[#ffd100] hover:bg-[#ffc800] text-[#0d4788] font-black text-xs sm:text-sm flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer"
+                    >
+                      <CheckCircle2 className="w-4 h-4 text-[#0d4788]" />
+                      <span>Aprobar Cotización y Mandar a Producción</span>
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -902,9 +927,44 @@ export const ColorLinkEcosystem: React.FC<ColorLinkEcosystemProps> = ({
                 </span>
                 <span className="text-emerald-800">{prodOrder.qaMetrics.approvedBy}</span>
               </div>
-              <span className="px-3 py-1 rounded-full bg-emerald-700 text-white font-bold">
-                Aprobado para Entrega y Aplicación
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="px-3 py-1 rounded-full bg-emerald-700 text-white font-bold">
+                  Aprobado para Entrega y Aplicación
+                </span>
+                {request.status !== 'Completada' ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (onUpdateProject) {
+                        onUpdateProject({
+                          ...request,
+                          status: 'Completada',
+                          deliveryDate: new Date().toLocaleDateString('es-CO'),
+                          trackingNumber: request.trackingNumber || `PTC-TRK-${Math.floor(100000 + Math.random() * 900000)}`,
+                          assignedCarrier: 'Flota Logística Pintuco Express',
+                          completedAt: new Date().toISOString(),
+                        });
+                      }
+                      if (onNavigateToStatus) {
+                        onNavigateToStatus();
+                      }
+                    }}
+                    className="px-4 py-1.5 rounded-full bg-[#ffd100] hover:bg-[#ffc800] text-[#0d4788] font-black flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
+                  >
+                    <Truck className="w-3.5 h-3.5" />
+                    <span>Despachar y Entregar en Obra</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={onNavigateToStatus}
+                    className="px-3 py-1 rounded-full bg-emerald-800 text-white font-bold flex items-center gap-1 cursor-pointer"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5 text-[#ffd100]" />
+                    <span>Ver Entrega en Obra</span>
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </div>

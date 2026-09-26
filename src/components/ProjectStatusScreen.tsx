@@ -50,14 +50,18 @@ export const ProjectStatusScreen: React.FC<ProjectStatusScreenProps> = ({
   onNavigateToAdvisorPortal,
   onUpdateProject,
 }) => {
-  // Photos Gallery state
+  // Photos Gallery state - incorporates user project photo if uploaded
   const photos = [
     {
       id: 0,
-      title: 'Espacio Principal Sala & Comedor',
+      title: request?.surfaceType ? `Superficie: ${request.surfaceType}` : 'Espacio Principal Sala & Comedor',
       label: 'Inspección Digital de Superficie',
-      url: 'https://lh3.googleusercontent.com/aida/AEtjO1XGulv6BFlNCMVJ-v9Vr6kAcMtzVmUpR20kPQTBrpA2R8HZ9CvuLlA2QwBBX_ihb-pTiv3t4AomJe72yWvfNl6HAO-m9_--tqsoCK9UD8RybLXwjwNZc0TyipvKqr_fViDF28Li-Lez-BBOYw51oOoPeam4O-_vILrAPTrxrFaBmqkdMlVcu8GWo3W5i0zSQozSDfymMslLw4Ms5R2JwY7w0fnYcG2v9js2V5O3AMBHKba7LDU-Zh9XSRRl',
-      caption: 'Evaluación técnica: Muros secos sin eflorescencia. Apto para sistema Viniltex.',
+      url:
+        request?.photoUrl ||
+        'https://lh3.googleusercontent.com/aida/AEtjO1XGulv6BFlNCMVJ-v9Vr6kAcMtzVmUpR20kPQTBrpA2R8HZ9CvuLlA2QwBBX_ihb-pTiv3t4AomJe72yWvfNl6HAO-m9_--tqsoCK9UD8RybLXwjwNZc0TyipvKqr_fViDF28Li-Lez-BBOYw51oOoPeam4O-_vILrAPTrxrFaBmqkdMlVcu8GWo3W5i0zSQozSDfymMslLw4Ms5R2JwY7w0fnYcG2v9js2V5O3AMBHKba7LDU-Zh9XSRRl',
+      caption:
+        request?.diagnosis?.diagnosticSummary ||
+        'Evaluación técnica: Muros secos sin eflorescencia. Apto para sistema de recubrimientos Pintuco.',
     },
     {
       id: 1,
@@ -71,14 +75,14 @@ export const ProjectStatusScreen: React.FC<ProjectStatusScreenProps> = ({
       title: 'Calibración Color',
       label: '2. Calibración Color',
       url: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCdXgBhm2w_EMg5MzqHS1o8jVdgmfF7KmsDm6BTBIqulag2XkoOCuCatihXherprhq7U4WQ4Y2Wk5rAYnjxLCozjza5BJ5LAmLZrXYPv4fdYPtq3ff7x63jjWa496VgOs4is-Q9dWGspAuw8WCUIGUZPNwjXq4VEV81QVt1_rAucjPklkbR2po6nhfOeYt1shL3PAJ6xDh3yQsUaRmO4YSQE5ZGmTq4_ErmMl9iwCEdJ8mQAad9E2b1mQ',
-      caption: 'Pruebas de tono y calibración espectrofotométrica según cartas de color Pintuco.',
+      caption: `Pruebas de tono y calibración espectrofotométrica según cartas de color Pintuco: ${request?.colorFamily || 'Arena Cálido'}.`,
     },
     {
       id: 3,
       title: 'Perímetro Total',
       label: '3. Perímetro Total',
       url: 'https://lh3.googleusercontent.com/aida-public/AB6AXuDMQ9cZmvQGEnFasKkYdMkA0-lkX4UhgoW8junLqn8HnbfIPxQ4RIDipxYlUWIxn3UzAnlnksoCpeNRTRLh8s8_oXnbY1tQqeIg0nxkCOayLAcW7V6ExYmrpKknveqZ4utpB_MXhaorN_jZYkCXaBw7FdOezU1IfQpyVpQV1-e1XkmRnHiLGLRYAiNFYcOZIFIkF-DRa99XLa8YJibqxsiKfyZhQ3ZigF3N4VjHl3LPoYlpB7r2U5sVuw',
-      caption: 'Levantamiento perimetral con descuento de vanos, puertas y ventanería: 45 m² netos.',
+      caption: `Levantamiento perimetral con descuento de vanos, puertas y ventanería: ${request?.areaM2 || 45} m² netos.`,
     },
   ];
 
@@ -86,6 +90,7 @@ export const ProjectStatusScreen: React.FC<ProjectStatusScreenProps> = ({
   const [showFullExpedienteModal, setShowFullExpedienteModal] = useState(false);
   const [showFichaTecnicaModal, setShowFichaTecnicaModal] = useState(false);
   const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
+  const [showCertificateModal, setShowCertificateModal] = useState(false);
 
   // Products and Color State
   const defaultItems: QuotationItem[] = [
@@ -228,6 +233,127 @@ export const ProjectStatusScreen: React.FC<ProjectStatusScreenProps> = ({
   const projectCity = request?.city ? `${request.city}, Colombia` : 'Bogotá, D.C.';
   const projectAddress = request?.address || 'Calle 127 # 19-45, Apto 402, Bogotá';
   const projectArea = request?.areaM2 || 45;
+  const currentStatus = request?.status || 'Cotizada';
+
+  const createdAtFormatted = request?.createdAt
+    ? new Date(request.createdAt).toLocaleDateString('es-CO', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+      })
+    : '12 May 2024';
+
+  const requiredDateFormatted = request?.requiredDate
+    ? new Date(request.requiredDate).toLocaleDateString('es-CO', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+      })
+    : '28 May 2024';
+
+  const projectTitle = request?.surfaceType
+    ? `Diagnóstico Técnico y Suministro de Recubrimientos para ${request.surfaceType} - ${request.city}`
+    : 'Diagnóstico Técnico y Suministro de Recubrimientos - Sala Principal y Comedor';
+
+  // Lifecycle stage mapping
+  let currentPhaseNumber = 3;
+  let progressPercent = 65;
+  let phaseStatusBadge = 'Cotizada • Fase 3 de 5';
+  let phaseBadgeClass = 'bg-[#ffd100]/30 text-[#725c00]';
+  let phaseDescription =
+    'Cotización oficial y especificación técnica aprobadas. Paleta y materiales listos para autorizar producción o ajustar.';
+
+  switch (currentStatus) {
+    case 'Registrada':
+      currentPhaseNumber = 1;
+      progressPercent = 20;
+      phaseStatusBadge = 'Recibida • Fase 1 de 5';
+      phaseBadgeClass = 'bg-[#fcf3e0] text-[#725c00]';
+      phaseDescription =
+        'Solicitud recibida correctamente en el ecosistema Pintuco ColorLink. Esperando análisis de sustrato y formulación.';
+      break;
+    case 'Analizada por IA':
+      currentPhaseNumber = 2;
+      progressPercent = 40;
+      phaseStatusBadge = 'Diagnosticada • Fase 2 de 5';
+      phaseBadgeClass = 'bg-[#d6e3ff] text-[#001b3d]';
+      phaseDescription =
+        'Diagnóstico computacional de sustrato y textura completado con IA Gemini. Cálculo de manos y rendimiento listo.';
+      break;
+    case 'Cotizada':
+      currentPhaseNumber = 3;
+      progressPercent = 65;
+      phaseStatusBadge = 'Cotizada • Fase 3 de 5';
+      phaseBadgeClass = 'bg-[#ffd100]/30 text-[#725c00]';
+      phaseDescription =
+        'Formulación y cotización comercial vigentes. Puedes modificar colores con la rueda o agregar insumos antes de aprobar.';
+      break;
+    case 'Inventario Asignado':
+      currentPhaseNumber = 4;
+      progressPercent = 75;
+      phaseStatusBadge = 'Stock Reservado • Fase 4 de 5';
+      phaseBadgeClass = 'bg-[#dcfce7] text-[#166534]';
+      phaseDescription =
+        'Lote bloqueado en SAP R/3 en el Centro de Distribución. Listo para dispensado tintométrico y mezcla en planta.';
+      break;
+    case 'En Producción':
+      currentPhaseNumber = 4;
+      progressPercent = 85;
+      phaseStatusBadge = 'En Fabricación • Fase 4 de 5';
+      phaseBadgeClass = 'bg-[#dbeafe] text-[#1e40af]';
+      phaseDescription =
+        'Proceso de tinturado computarizado Giotto y envasado en curso. Ensayos de viscosidad y espesor de película en ejecución.';
+      break;
+    case 'Aprobada QA':
+      currentPhaseNumber = 4;
+      progressPercent = 92;
+      phaseStatusBadge = 'Calidad Certificada • Fase 4 de 5';
+      phaseBadgeClass = 'bg-[#ecfdf5] text-[#047857]';
+      phaseDescription =
+        'Lote aprobado bajo normas ISO 9001 / ASTM con Delta E < 0.5. Precintos de seguridad colocados para despacho.';
+      break;
+    case 'Completada':
+      currentPhaseNumber = 5;
+      progressPercent = 100;
+      phaseStatusBadge = 'Entregado en Obra • Fase 5 de 5';
+      phaseBadgeClass = 'bg-emerald-100 text-emerald-900 border border-emerald-400 font-bold';
+      phaseDescription = `¡Pedido entregado con éxito en ${projectAddress}! Remisión firmada a satisfacción y Garantía Pintuco de 5 años activa.`;
+      break;
+  }
+
+  // Handle advancement of the project lifecycle along the route
+  const handleAdvanceStatus = (newStatus: ProjectRequest['status']) => {
+    if (!request) return;
+    const now = new Date();
+    const updated: ProjectRequest = {
+      ...request,
+      status: newStatus,
+      trackingNumber:
+        newStatus === 'Completada'
+          ? request.trackingNumber || `PTC-TRK-${Math.floor(100000 + Math.random() * 900000)}`
+          : request.trackingNumber,
+      assignedCarrier:
+        newStatus === 'Completada'
+          ? request.assignedCarrier || 'Flota Logística Pintuco Express'
+          : request.assignedCarrier,
+      deliveryDate:
+        newStatus === 'Completada'
+          ? request.deliveryDate || now.toLocaleDateString('es-CO')
+          : request.deliveryDate,
+      approvedAt:
+        newStatus === 'Inventario Asignado' || newStatus === 'En Producción'
+          ? request.approvedAt || now.toISOString()
+          : request.approvedAt,
+      completedAt:
+        newStatus === 'Completada'
+          ? request.completedAt || now.toISOString()
+          : request.completedAt,
+    };
+
+    if (onUpdateProject) {
+      onUpdateProject(updated);
+    }
+  };
 
   return (
     <div className="w-full max-w-7xl mx-auto px-4 md:px-8 py-6 md:py-10">
@@ -254,7 +380,7 @@ export const ProjectStatusScreen: React.FC<ProjectStatusScreenProps> = ({
         <div className="flex items-center gap-2 bg-[#f0e7d5] px-3 py-1.5 rounded-full border border-[#d1c6ab]/40">
           <span className="w-2.5 h-2.5 rounded-full bg-[#ffd100] animate-pulse"></span>
           <span className="text-[11px] text-[#1f1b10] font-bold tracking-wider uppercase">
-            Actualizado hace 2 horas
+            Actualizado en tiempo real
           </span>
         </div>
       </div>
@@ -269,9 +395,9 @@ export const ProjectStatusScreen: React.FC<ProjectStatusScreenProps> = ({
               <span className="bg-[#ffd100] text-[#6f5a00] text-xs px-3.5 py-1 rounded-full font-bold tracking-wide shadow-2xs">
                 {projectCode}
               </span>
-              <span className="bg-[#d6e3ff] text-[#001b3d] text-xs px-3 py-1 rounded-full font-semibold flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-[#2f5ea1]"></span>
-                En Proceso • Fase 3 de 5
+              <span className={`text-xs px-3 py-1 rounded-full font-semibold flex items-center gap-1.5 ${phaseBadgeClass}`}>
+                <span className="w-2 h-2 rounded-full bg-current"></span>
+                {phaseStatusBadge}
               </span>
               <span className="text-xs text-[#4d4632] bg-[#f6eddb] px-3 py-1 rounded-full font-medium">
                 Garantía 5 Años Pintuco®
@@ -279,21 +405,23 @@ export const ProjectStatusScreen: React.FC<ProjectStatusScreenProps> = ({
             </div>
 
             <h1 className="text-2xl sm:text-3xl lg:text-4xl font-black text-[#1f1b10] tracking-tight leading-tight">
-              Diagnóstico Técnico y Suministro de Recubrimientos - Sala Principal y Comedor
+              {projectTitle}
             </h1>
 
             <div className="flex flex-wrap items-center gap-y-2 gap-x-6 text-[#4d4632] text-xs sm:text-sm pt-1 font-medium">
               <div className="flex items-center gap-2">
                 <Calendar className="w-4 h-4 text-[#2f5ea1]" />
                 <span>
-                  Solicitud: <strong className="text-[#1f1b10] font-bold">12 May 2024</strong>
+                  Solicitud: <strong className="text-[#1f1b10] font-bold">{createdAtFormatted}</strong>
                 </span>
               </div>
               <div className="flex items-center gap-2">
                 <Clock className="w-4 h-4 text-[#edc200]" />
                 <span>
-                  Finalización estimada:{' '}
-                  <strong className="text-[#1f1b10] font-bold">28 May 2024</strong>
+                  {currentStatus === 'Completada' ? 'Entregado en Obra: ' : 'Finalización estimada: '}
+                  <strong className="text-[#1f1b10] font-bold">
+                    {currentStatus === 'Completada' ? (request?.deliveryDate || 'Hoy') : requiredDateFormatted}
+                  </strong>
                 </span>
               </div>
               <div className="flex items-center gap-2">
@@ -327,7 +455,132 @@ export const ProjectStatusScreen: React.FC<ProjectStatusScreenProps> = ({
         </div>
       </div>
 
-      {/* Timeline / Stepper Section */}
+      {/* Interactive Lifecycle Route Controller Banner */}
+      <div className="bg-gradient-to-r from-[#fcf3e0] via-[#fff8f0] to-[#f6eddb] rounded-2xl p-6 border-2 border-[#ffd100] shadow-sm mb-8">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5">
+          <div className="space-y-1.5 max-w-2xl">
+            <div className="flex items-center gap-2 text-xs font-black text-[#725c00] uppercase tracking-wider">
+              <Sparkles className="w-4 h-4 text-[#ffd100] fill-[#ffd100]" />
+              <span>Gestión de Ruta Integral (Creación → Entrega)</span>
+            </div>
+            <h3 className="text-lg sm:text-xl font-black text-[#1f1b10]">
+              {currentStatus === 'Registrada' && 'Paso 1: Solicitud Recibida - Generando Formulación'}
+              {currentStatus === 'Analizada por IA' && 'Paso 2: Diagnóstico IA Listo - Emitiendo Cotización'}
+              {currentStatus === 'Cotizada' && 'Paso 3: Cotización & Color - ¿Listo para autorizar producción?'}
+              {currentStatus === 'Inventario Asignado' && 'Paso 4A: Stock Bloqueado en SAP - Iniciar Tinturado'}
+              {currentStatus === 'En Producción' && 'Paso 4B: Tinturado en Planta - Ensayos de Laboratorio QA'}
+              {currentStatus === 'Aprobada QA' && 'Paso 4C: Calidad Certificada ISO 9001 - Listo para Despacho'}
+              {currentStatus === 'Completada' && 'Paso 5: ¡Proyecto Entregado con Éxito en Obra!'}
+            </h3>
+            <p className="text-xs sm:text-sm text-[#4d4632]">
+              {currentStatus === 'Cotizada' &&
+                'Revisa los insumos abajo. Puedes ajustar el tono mediante la rueda de color o agregar nuevos productos antes de autorizar el pedido.'}
+              {currentStatus === 'Inventario Asignado' &&
+                'Las bases tintométricas están apartadas en el CEDI. Al dar inicio, la planta comenzará la dosificación Giotto.'}
+              {currentStatus === 'En Producción' &&
+                'Las pinturas se encuentran en calibración colorimétrica y prueba de adherencia. Al verificar parámetros puedes aprobar el lote.'}
+              {currentStatus === 'Aprobada QA' &&
+                'El lote cumple con Delta E < 0.5 y pruebas ASTM. Procede a despachar con la flota logística de Pintuco.'}
+              {currentStatus === 'Completada' &&
+                `Transporte finalizado con guía ${request?.trackingNumber || 'PTC-TRK-892401'}. El certificado de garantía de 5 años está emitido.`}
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3 shrink-0">
+            {currentStatus === 'Cotizada' && (
+              <button
+                type="button"
+                onClick={() => handleAdvanceStatus('Inventario Asignado')}
+                className="px-6 py-3.5 rounded-xl bg-[#ffd100] hover:bg-[#ffc800] text-[#0d4788] text-sm font-black shadow-md hover:shadow-lg transition-all flex items-center gap-2 cursor-pointer"
+                id="btn-advance-to-production"
+              >
+                <CheckCircle2 className="w-5 h-5 text-[#0d4788]" />
+                <span>Aprobar Cotización y Reservar Stock</span>
+              </button>
+            )}
+
+            {currentStatus === 'Inventario Asignado' && (
+              <button
+                type="button"
+                onClick={() => handleAdvanceStatus('En Producción')}
+                className="px-6 py-3.5 rounded-xl bg-[#2f5ea1] hover:bg-[#254b80] text-white text-sm font-black shadow-md hover:shadow-lg transition-all flex items-center gap-2 cursor-pointer"
+                id="btn-advance-to-tinting"
+              >
+                <FlaskConical className="w-5 h-5 text-[#ffd100]" />
+                <span>Iniciar Tinturado & Fabricación</span>
+              </button>
+            )}
+
+            {currentStatus === 'En Producción' && (
+              <button
+                type="button"
+                onClick={() => handleAdvanceStatus('Aprobada QA')}
+                className="px-6 py-3.5 rounded-xl bg-[#00875a] hover:bg-[#006644] text-white text-sm font-black shadow-md hover:shadow-lg transition-all flex items-center gap-2 cursor-pointer"
+                id="btn-advance-to-qa"
+              >
+                <ShieldCheck className="w-5 h-5 text-white" />
+                <span>Certificar Calidad Lote (QA ISO 9001)</span>
+              </button>
+            )}
+
+            {currentStatus === 'Aprobada QA' && (
+              <button
+                type="button"
+                onClick={() => handleAdvanceStatus('Completada')}
+                className="px-6 py-3.5 rounded-xl bg-[#ffd100] hover:bg-[#ffc800] text-[#0d4788] text-sm font-black shadow-md hover:shadow-lg transition-all flex items-center gap-2 cursor-pointer"
+                id="btn-advance-to-delivery"
+              >
+                <Truck className="w-5 h-5 text-[#0d4788]" />
+                <span>Despachar y Confirmar Entrega en Obra</span>
+              </button>
+            )}
+
+            {currentStatus === 'Completada' && (
+              <button
+                type="button"
+                onClick={() => setShowCertificateModal(true)}
+                className="px-6 py-3.5 rounded-xl bg-[#2f5ea1] hover:bg-[#254b80] text-white text-sm font-black shadow-md transition-all flex items-center gap-2 cursor-pointer"
+                id="btn-view-certificate"
+              >
+                <ShieldCheck className="w-5 h-5 text-[#ffd100]" />
+                <span>Ver Certificado de Garantía 5 Años</span>
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Phase Simulator Controls for Full Route Testing */}
+        <div className="mt-5 pt-4 border-t border-[#d1c6ab]/50 flex flex-wrap items-center justify-between gap-3 text-xs">
+          <span className="font-bold text-[#725c00] flex items-center gap-1.5">
+            <Edit3 className="w-3.5 h-3.5" />
+            <span>Simulador de Estados de la Ruta:</span>
+          </span>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {[
+              { label: '1. Registrada', status: 'Registrada' as const },
+              { label: '2. Diagnóstico IA', status: 'Analizada por IA' as const },
+              { label: '3. Cotizada & Color', status: 'Cotizada' as const },
+              { label: '4. En Producción / QA', status: 'En Producción' as const },
+              { label: '5. Entregado en Obra', status: 'Completada' as const },
+            ].map((st) => (
+              <button
+                key={st.status}
+                type="button"
+                onClick={() => handleAdvanceStatus(st.status)}
+                className={`px-3 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                  currentStatus === st.status
+                    ? 'bg-[#1f1b10] text-[#ffd100] shadow-xs'
+                    : 'bg-white hover:bg-[#f6eddb] text-[#4d4632] border border-[#d1c6ab]'
+                }`}
+              >
+                {st.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Timeline / Stepper Section - DYNAMIC 5 PHASES */}
       <div className="bg-white rounded-2xl shadow-xs border border-[#ebe2cf] p-6 md:p-8 mb-8">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
           <div>
@@ -345,17 +598,17 @@ export const ProjectStatusScreen: React.FC<ProjectStatusScreenProps> = ({
             <div className="w-36 bg-[#f6eddb] rounded-full h-3 overflow-hidden p-0.5 border border-[#d1c6ab]/30">
               <div
                 className="bg-[#ffd100] h-full rounded-full transition-all duration-500 shadow-xs"
-                style={{ width: '65%' }}
+                style={{ width: `${progressPercent}%` }}
               ></div>
             </div>
-            <span className="text-sm font-bold text-[#1f1b10]">65%</span>
+            <span className="text-sm font-bold text-[#1f1b10]">{progressPercent}%</span>
           </div>
         </div>
 
         {/* Stepper Grid */}
         <div className="relative">
           <div className="grid grid-cols-1 md:grid-cols-5 gap-4 relative z-10">
-            {/* Step 1: Completada */}
+            {/* Step 1: Solicitud Recibida */}
             <div className="flex md:flex-col items-start gap-4 md:gap-3 p-3.5 rounded-xl bg-[#fcf3e0] border border-[#ebe2cf] transition-all">
               <div className="flex md:flex-col items-center gap-2 w-full">
                 <div className="w-10 h-10 rounded-full bg-[#2f5ea1] text-white flex items-center justify-center shrink-0 shadow-xs">
@@ -370,17 +623,31 @@ export const ProjectStatusScreen: React.FC<ProjectStatusScreenProps> = ({
                 <h3 className="text-sm font-bold text-[#1f1b10] leading-tight mt-0.5">
                   Solicitud Recibida
                 </h3>
-                <p className="text-xs text-[#7f765f] mt-1">Completada el 12 May</p>
+                <p className="text-xs text-[#7f765f] mt-1">{createdAtFormatted}</p>
               </div>
             </div>
 
-            {/* Step 2: Completada */}
-            <div className="flex md:flex-col items-start gap-4 md:gap-3 p-3.5 rounded-xl bg-[#fcf3e0] border border-[#ebe2cf] transition-all">
+            {/* Step 2: Análisis de Superficie & IA */}
+            <div
+              className={`flex md:flex-col items-start gap-4 md:gap-3 p-3.5 rounded-xl transition-all border ${
+                currentPhaseNumber >= 2
+                  ? 'bg-[#fcf3e0] border-[#ebe2cf]'
+                  : 'bg-white border-[#ebe2cf] opacity-75'
+              }`}
+            >
               <div className="flex md:flex-col items-center gap-2 w-full">
-                <div className="w-10 h-10 rounded-full bg-[#2f5ea1] text-white flex items-center justify-center shrink-0 shadow-xs">
-                  <Check className="w-5 h-5 text-white stroke-[2.5]" />
+                <div
+                  className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 shadow-xs font-bold ${
+                    currentPhaseNumber >= 2 ? 'bg-[#2f5ea1] text-white' : 'bg-[#f6eddb] text-[#7f765f]'
+                  }`}
+                >
+                  {currentPhaseNumber >= 2 ? <Check className="w-5 h-5 text-white stroke-[2.5]" /> : '2'}
                 </div>
-                <div className="hidden md:block w-full h-1 bg-[#2f5ea1] rounded-full"></div>
+                <div
+                  className={`hidden md:block w-full h-1 rounded-full ${
+                    currentPhaseNumber >= 2 ? 'bg-[#2f5ea1]' : 'bg-[#f6eddb]'
+                  }`}
+                ></div>
               </div>
               <div className="flex-1">
                 <span className="text-[11px] text-[#4d4632] uppercase font-bold tracking-wider">
@@ -389,68 +656,146 @@ export const ProjectStatusScreen: React.FC<ProjectStatusScreenProps> = ({
                 <h3 className="text-sm font-bold text-[#1f1b10] leading-tight mt-0.5">
                   Análisis de Superficie
                 </h3>
-                <p className="text-xs text-[#7f765f] mt-1">Evaluación de fotos lista</p>
+                <p className="text-xs text-[#7f765f] mt-1">
+                  {currentPhaseNumber >= 2 ? 'IA Gemini Evaluada' : 'Pendiente'}
+                </p>
               </div>
             </div>
 
-            {/* Step 3: ACTUAL EN CURSO */}
-            <div className="flex md:flex-col items-start gap-4 md:gap-3 p-4 rounded-xl bg-[#ffd100]/20 ring-2 ring-[#ffd100] shadow-md transition-all border border-[#ffd100]/40">
+            {/* Step 3: Diagnóstico & Formulación (Cotizada & Color) */}
+            <div
+              className={`flex md:flex-col items-start gap-4 md:gap-3 p-3.5 rounded-xl transition-all border ${
+                currentPhaseNumber === 3
+                  ? 'bg-[#ffd100]/20 ring-2 ring-[#ffd100] border-[#ffd100]/50 shadow-md'
+                  : currentPhaseNumber > 3
+                  ? 'bg-[#fcf3e0] border-[#ebe2cf]'
+                  : 'bg-white border-[#ebe2cf] opacity-75'
+              }`}
+            >
               <div className="flex md:flex-col items-center gap-2 w-full">
-                <div className="w-10 h-10 rounded-full bg-[#ffd100] text-[#6f5a00] flex items-center justify-center shrink-0 shadow-xs font-bold">
-                  <FlaskConical className="w-5 h-5" />
+                <div
+                  className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 shadow-xs font-bold ${
+                    currentPhaseNumber > 3
+                      ? 'bg-[#2f5ea1] text-white'
+                      : currentPhaseNumber === 3
+                      ? 'bg-[#ffd100] text-[#6f5a00]'
+                      : 'bg-[#f6eddb] text-[#7f765f]'
+                  }`}
+                >
+                  {currentPhaseNumber > 3 ? (
+                    <Check className="w-5 h-5 text-white stroke-[2.5]" />
+                  ) : (
+                    <FlaskConical className="w-5 h-5" />
+                  )}
                 </div>
-                <div className="hidden md:block w-full h-1.5 bg-[#ffd100] rounded-full overflow-hidden">
-                  <div className="bg-[#725c00] h-full w-2/3 animate-pulse"></div>
-                </div>
+                <div
+                  className={`hidden md:block w-full h-1 rounded-full ${
+                    currentPhaseNumber > 3
+                      ? 'bg-[#2f5ea1]'
+                      : currentPhaseNumber === 3
+                      ? 'bg-[#ffd100]'
+                      : 'bg-[#f6eddb]'
+                  }`}
+                ></div>
               </div>
               <div className="flex-1">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[11px] text-[#6f5a00] uppercase font-black tracking-wider">
-                    Fase 3 • En curso
-                  </span>
-                </div>
+                <span className="text-[11px] text-[#4d4632] uppercase font-bold tracking-wider">
+                  {currentPhaseNumber === 3 ? 'Fase 3 • En curso' : 'Fase 3'}
+                </span>
                 <h3 className="text-sm font-bold text-[#1f1b10] leading-tight mt-0.5">
-                  Diagnóstico & Formulación
+                  Cotización & Color
                 </h3>
-                <p className="text-xs text-[#4d4632] mt-1">65% cálculo y tintometría</p>
+                <p className="text-xs text-[#7f765f] mt-1">
+                  {currentPhaseNumber > 3 ? 'Aprobada por cliente' : 'Formulación lista'}
+                </p>
               </div>
             </div>
 
-            {/* Step 4: Pendiente */}
-            <div className="flex md:flex-col items-start gap-4 md:gap-3 p-3.5 rounded-xl bg-white border border-[#ebe2cf] opacity-75">
+            {/* Step 4: Producción & Tintometría QA */}
+            <div
+              className={`flex md:flex-col items-start gap-4 md:gap-3 p-3.5 rounded-xl transition-all border ${
+                currentPhaseNumber === 4
+                  ? 'bg-[#ffd100]/20 ring-2 ring-[#ffd100] border-[#ffd100]/50 shadow-md'
+                  : currentPhaseNumber > 4
+                  ? 'bg-[#fcf3e0] border-[#ebe2cf]'
+                  : 'bg-white border-[#ebe2cf] opacity-75'
+              }`}
+            >
               <div className="flex md:flex-col items-center gap-2 w-full">
-                <div className="w-10 h-10 rounded-full bg-[#f6eddb] text-[#7f765f] flex items-center justify-center shrink-0 font-bold text-sm">
-                  4
+                <div
+                  className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 shadow-xs font-bold ${
+                    currentPhaseNumber > 4
+                      ? 'bg-[#2f5ea1] text-white'
+                      : currentPhaseNumber === 4
+                      ? 'bg-[#ffd100] text-[#6f5a00]'
+                      : 'bg-[#f6eddb] text-[#7f765f]'
+                  }`}
+                >
+                  {currentPhaseNumber > 4 ? (
+                    <Check className="w-5 h-5 text-white stroke-[2.5]" />
+                  ) : (
+                    <Package className="w-5 h-5" />
+                  )}
                 </div>
-                <div className="hidden md:block w-full h-1 bg-[#f6eddb] rounded-full"></div>
+                <div
+                  className={`hidden md:block w-full h-1 rounded-full ${
+                    currentPhaseNumber > 4
+                      ? 'bg-[#2f5ea1]'
+                      : currentPhaseNumber === 4
+                      ? 'bg-[#ffd100]'
+                      : 'bg-[#f6eddb]'
+                  }`}
+                ></div>
               </div>
               <div className="flex-1">
-                <span className="text-[11px] text-[#7f765f] uppercase font-bold tracking-wider">
-                  Fase 4
+                <span className="text-[11px] text-[#4d4632] uppercase font-bold tracking-wider">
+                  {currentPhaseNumber === 4 ? 'Fase 4 • En Planta' : 'Fase 4'}
                 </span>
-                <h3 className="text-sm font-semibold text-[#4d4632] leading-tight mt-0.5">
-                  Envasado de Producto
+                <h3 className="text-sm font-bold text-[#1f1b10] leading-tight mt-0.5">
+                  Producción & QA
                 </h3>
-                <p className="text-xs text-[#7f765f] mt-1">Est. 20-22 May</p>
+                <p className="text-xs text-[#7f765f] mt-1">
+                  {currentPhaseNumber > 4
+                    ? 'Lote QA Certificado'
+                    : currentPhaseNumber === 4
+                    ? 'Dispensado Giotto'
+                    : 'Est. Tintometría'}
+                </p>
               </div>
             </div>
 
-            {/* Step 5: Pendiente */}
-            <div className="flex md:flex-col items-start gap-4 md:gap-3 p-3.5 rounded-xl bg-white border border-[#ebe2cf] opacity-75">
+            {/* Step 5: Entrega & Despacho */}
+            <div
+              className={`flex md:flex-col items-start gap-4 md:gap-3 p-3.5 rounded-xl transition-all border ${
+                currentPhaseNumber === 5
+                  ? 'bg-emerald-50 ring-2 ring-emerald-500 border-emerald-300 shadow-md'
+                  : 'bg-white border-[#ebe2cf] opacity-75'
+              }`}
+            >
               <div className="flex md:flex-col items-center gap-2 w-full">
-                <div className="w-10 h-10 rounded-full bg-[#f6eddb] text-[#7f765f] flex items-center justify-center shrink-0 font-bold text-sm">
-                  5
+                <div
+                  className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 shadow-xs font-bold ${
+                    currentPhaseNumber === 5 ? 'bg-emerald-600 text-white' : 'bg-[#f6eddb] text-[#7f765f]'
+                  }`}
+                >
+                  {currentPhaseNumber === 5 ? <Check className="w-5 h-5 text-white stroke-[2.5]" /> : '5'}
                 </div>
-                <div className="hidden md:block w-full h-1 bg-[#f6eddb] rounded-full"></div>
+                <div
+                  className={`hidden md:block w-full h-1 rounded-full ${
+                    currentPhaseNumber === 5 ? 'bg-emerald-600' : 'bg-[#f6eddb]'
+                  }`}
+                ></div>
               </div>
               <div className="flex-1">
-                <span className="text-[11px] text-[#7f765f] uppercase font-bold tracking-wider">
-                  Fase 5
+                <span className="text-[11px] text-[#4d4632] uppercase font-bold tracking-wider">
+                  {currentPhaseNumber === 5 ? 'Fase 5 • Completada' : 'Fase 5'}
                 </span>
-                <h3 className="text-sm font-semibold text-[#4d4632] leading-tight mt-0.5">
+                <h3 className="text-sm font-bold text-[#1f1b10] leading-tight mt-0.5">
                   Entrega & Despacho
                 </h3>
-                <p className="text-xs text-[#7f765f] mt-1">Est. 24 May</p>
+                <p className="text-xs text-[#7f765f] mt-1">
+                  {currentPhaseNumber === 5 ? 'Entregado en Obra' : `Est. ${requiredDateFormatted}`}
+                </p>
               </div>
             </div>
           </div>
@@ -466,14 +811,12 @@ export const ProjectStatusScreen: React.FC<ProjectStatusScreenProps> = ({
                   Detalle técnico de la fase actual:
                 </p>
                 <p className="text-xs sm:text-sm text-[#4d4632] leading-relaxed mt-0.5">
-                  Análisis de fotos remitidas concluido. Sustrato con porosidad moderada: se prescribe
-                  Sellador Antihumedad previo a Viniltex Avanzado. Paleta confirmada: Salmón
-                  Terracota & Blanco Lienzo.
+                  {phaseDescription}
                 </p>
               </div>
             </div>
             <span className="text-xs text-[#2f5ea1] font-bold px-3 py-1.5 bg-white rounded-lg shadow-2xs border border-[#ebe2cf] whitespace-nowrap">
-              Diagnóstico de Sustrato: Aprobado
+              {currentStatus === 'Completada' ? 'Estado: Finalizado con Éxito' : 'Control Técnico: Activo'}
             </span>
           </div>
         </div>
@@ -855,38 +1198,110 @@ export const ProjectStatusScreen: React.FC<ProjectStatusScreenProps> = ({
             </div>
           </div>
 
-          {/* Next Scheduled Milestone Card */}
-          <div className="bg-white rounded-2xl shadow-xs border border-[#ebe2cf] p-6 md:p-8">
-            <div className="flex items-center gap-2.5 mb-4">
-              <Truck className="w-5 h-5 text-[#2f5ea1]" />
-              <h3 className="text-lg font-bold text-[#1f1b10]">Próximo Hito de Entrega</h3>
+          {/* Next Scheduled Milestone Card / Delivery Confirmation */}
+          <div
+            className={`rounded-2xl shadow-xs border p-6 md:p-8 transition-all ${
+              currentStatus === 'Completada'
+                ? 'bg-emerald-50/70 border-emerald-300'
+                : 'bg-white border-[#ebe2cf]'
+            }`}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2.5">
+                <Truck
+                  className={`w-5 h-5 ${
+                    currentStatus === 'Completada' ? 'text-emerald-700' : 'text-[#2f5ea1]'
+                  }`}
+                />
+                <h3 className="text-lg font-bold text-[#1f1b10]">
+                  {currentStatus === 'Completada'
+                    ? 'Estado de Entrega: ¡ENTREGADO!'
+                    : 'Próximo Hito de Entrega'}
+                </h3>
+              </div>
+              {currentStatus === 'Completada' && (
+                <span className="text-[11px] font-bold bg-emerald-200 text-emerald-900 px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span>En Obra</span>
+                </span>
+              )}
             </div>
 
-            <div className="p-4 rounded-xl bg-[#fcf3e0] border border-[#ebe2cf] mb-4">
-              <div className="flex items-center gap-2 text-[#2f5ea1] font-bold text-xs">
-                <Clock className="w-4 h-4" />
-                <span>Jueves 16 de Mayo, 11:00 AM</span>
-              </div>
-              <p className="text-sm font-bold text-[#1f1b10] mt-2 leading-snug">
-                Emisión de Diagnóstico Técnico Oficial y Envío a Tintometría
-              </p>
-              <p className="text-xs text-[#7f765f] mt-1">
-                Despacho programado a tu puerta: Entrega estimada 24 de Mayo.
-              </p>
-            </div>
+            {currentStatus === 'Completada' ? (
+              <div className="space-y-4">
+                <div className="p-4 rounded-xl bg-white border border-emerald-200 space-y-2 text-xs">
+                  <div className="flex justify-between">
+                    <span className="text-[#4d4632]">Fecha de Entrega:</span>
+                    <strong className="text-[#1f1b10]">{request?.deliveryDate || 'Hoy'}</strong>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[#4d4632]">Guía de Transporte:</span>
+                    <strong className="font-mono text-[#2f5ea1]">
+                      {request?.trackingNumber || 'PTC-TRK-892401'}
+                    </strong>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[#4d4632]">Transportador Asignado:</span>
+                    <strong className="text-[#1f1b10]">
+                      {request?.assignedCarrier || 'Flota Logística Pintuco Express'}
+                    </strong>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[#4d4632]">Dirección de Entrega:</span>
+                    <strong className="text-[#1f1b10] truncate max-w-[200px]">
+                      {projectAddress}
+                    </strong>
+                  </div>
+                </div>
 
-            <div className="p-4 rounded-xl bg-[#ffd100]/20 border border-[#ffd100]/30 flex items-start gap-3">
-              <Package className="w-5 h-5 text-[#725c00] shrink-0 mt-0.5" />
-              <div className="text-xs">
-                <strong className="text-[#1f1b10] font-bold block mb-0.5">
-                  Compromiso Logístico Pintuco:
-                </strong>
-                <p className="text-[#4d4632] leading-relaxed">
-                  Los envases viajan sellados con precinto de seguridad y lote de color certificado
-                  para garantizar fidelidad cromática 100%.
-                </p>
+                <button
+                  type="button"
+                  onClick={() => setShowCertificateModal(true)}
+                  className="w-full py-3 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-xs transition-colors cursor-pointer"
+                >
+                  <ShieldCheck className="w-4 h-4 text-[#ffd100]" />
+                  <span>Ver Certificado de Garantía 5 Años Pintuco®</span>
+                </button>
               </div>
-            </div>
+            ) : (
+              <>
+                <div className="p-4 rounded-xl bg-[#fcf3e0] border border-[#ebe2cf] mb-4">
+                  <div className="flex items-center gap-2 text-[#2f5ea1] font-bold text-xs">
+                    <Clock className="w-4 h-4" />
+                    <span>
+                      {currentStatus === 'En Producción'
+                        ? 'En tinturado industrial y envasado'
+                        : currentStatus === 'Aprobada QA'
+                        ? 'Empacado y listo para despacho'
+                        : `Programado para: ${requiredDateFormatted}`}
+                    </span>
+                  </div>
+                  <p className="text-sm font-bold text-[#1f1b10] mt-2 leading-snug">
+                    {currentStatus === 'En Producción'
+                      ? 'Dispensado en tintometría Giotto y prueba de adherencia'
+                      : currentStatus === 'Aprobada QA'
+                      ? 'Lote precintado con certificado ISO 9001 en planta'
+                      : 'Emisión de Diagnóstico Técnico Oficial y Envío a Tintometría'}
+                  </p>
+                  <p className="text-xs text-[#7f765f] mt-1">
+                    Despacho directo a tu puerta: Entrega estimada {requiredDateFormatted}.
+                  </p>
+                </div>
+
+                <div className="p-4 rounded-xl bg-[#ffd100]/20 border border-[#ffd100]/30 flex items-start gap-3">
+                  <Package className="w-5 h-5 text-[#725c00] shrink-0 mt-0.5" />
+                  <div className="text-xs">
+                    <strong className="text-[#1f1b10] font-bold block mb-0.5">
+                      Compromiso Logístico Pintuco:
+                    </strong>
+                    <p className="text-[#4d4632] leading-relaxed">
+                      Los envases viajan sellados con precinto de seguridad y lote de color certificado
+                      para garantizar fidelidad cromática 100%.
+                    </p>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
 
           {/* Financial & Guarantee Summary Card */}
@@ -1139,6 +1554,153 @@ export const ProjectStatusScreen: React.FC<ProjectStatusScreenProps> = ({
           initialCode={projectItems[colorModalTargetIndex].selectedColorCode || 'PT-248-A'}
           onApplyColor={handleApplyColorSelection}
         />
+      )}
+
+      {/* ===================== MODAL: CERTIFICADO DE GARANTÍA 5 AÑOS & ENTREGA ===================== */}
+      {showCertificateModal && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6 sm:p-8 shadow-2xl border border-[#ebe2cf] animate-fadeIn">
+            {/* Certificate Header */}
+            <div className="flex items-center justify-between pb-4 border-b border-[#ebe2cf] mb-6">
+              <div className="flex items-center gap-3">
+                <div className="bg-[#ffd100] text-[#6f5a00] px-3 py-1 rounded-xl text-xl font-black">
+                  PINTUCO
+                </div>
+                <div>
+                  <h3 className="text-base sm:text-lg font-black text-[#1f1b10]">
+                    Certificado de Garantía 5 Años & Entrega en Obra
+                  </h3>
+                  <span className="text-xs text-[#2f5ea1] font-bold">
+                    Ecosistema Digital ColorLink • Certificación ISO 9001:2015
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowCertificateModal(false)}
+                className="w-9 h-9 rounded-full bg-[#f6eddb] hover:bg-[#ebe2cf] text-[#1f1b10] flex items-center justify-center font-bold text-sm cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Certificate Body */}
+            <div className="space-y-5 text-xs sm:text-sm text-[#1f1b10]">
+              <div className="p-4 rounded-2xl bg-[#fcf3e0] border border-[#d1c6ab] flex flex-col sm:flex-row justify-between gap-4">
+                <div>
+                  <span className="text-[11px] text-[#7f765f] uppercase font-bold block">
+                    Titular del Proyecto
+                  </span>
+                  <strong className="text-base text-[#1f1b10]">
+                    {request?.client?.fullName || 'Cliente Pintuco'}
+                  </strong>
+                  <p className="text-xs text-[#4d4632] mt-0.5">
+                    {request?.client?.documentType}: {request?.client?.documentNumber}
+                  </p>
+                </div>
+                <div className="sm:text-right">
+                  <span className="text-[11px] text-[#7f765f] uppercase font-bold block">
+                    Proyecto & Guía
+                  </span>
+                  <strong className="text-sm font-mono text-[#2f5ea1]">
+                    {projectCode}
+                  </strong>
+                  <p className="text-xs text-[#7f765f] mt-0.5">
+                    Guía: {request?.trackingNumber || 'PTC-TRK-892401'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                <div className="p-3 rounded-xl bg-white border border-[#ebe2cf]">
+                  <span className="text-[#7f765f] block">Destino de Entrega:</span>
+                  <strong className="text-[#1f1b10]">{projectAddress}, {projectCity}</strong>
+                </div>
+                <div className="p-3 rounded-xl bg-white border border-[#ebe2cf]">
+                  <span className="text-[#7f765f] block">Fecha de Despacho & Entrega:</span>
+                  <strong className="text-[#1f1b10]">
+                    {request?.deliveryDate || new Date().toLocaleDateString('es-CO')}
+                  </strong>
+                </div>
+              </div>
+
+              {/* Products List in Certificate */}
+              <div>
+                <h4 className="font-bold text-xs uppercase text-[#725c00] tracking-wider mb-2">
+                  Productos y Recubrimientos Cubiertos por la Garantía:
+                </h4>
+                <div className="divide-y divide-[#ebe2cf] border border-[#ebe2cf] rounded-xl overflow-hidden bg-white text-xs">
+                  {projectItems.map((item, idx) => (
+                    <div key={idx} className="p-2.5 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        {item.selectedColorHex && (
+                          <span
+                            className="w-3.5 h-3.5 rounded-full border border-black/20 shrink-0"
+                            style={{ backgroundColor: item.selectedColorHex }}
+                          ></span>
+                        )}
+                        <div>
+                          <strong className="text-[#1f1b10] block">{item.name}</strong>
+                          <span className="text-[11px] text-[#7f765f]">
+                            {item.quantity} {item.unit} • {item.sku}
+                          </span>
+                        </div>
+                      </div>
+                      <span className="font-bold text-[#137333]">Garantía 5 Años ✓</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Lab Quality Specs Passed */}
+              <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 text-xs">
+                <strong className="text-emerald-950 block mb-1">
+                  Ensayos Técnicos de Calidad Aprobados en Laboratorio Central:
+                </strong>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+                  <div>Viscosidad: <strong>99 KU (Norma)</strong></div>
+                  <div>Colorimetría: <strong>ΔE = 0.31 (&lt; 0.5)</strong></div>
+                  <div>Adherencia ASTM: <strong>5B (Excelente)</strong></div>
+                  <div>Finura: <strong>Hegman 7</strong></div>
+                </div>
+              </div>
+
+              {/* Signature */}
+              <div className="pt-2 flex items-center justify-between text-xs text-[#7f765f] border-t border-[#ebe2cf]">
+                <div>
+                  <p className="font-bold text-[#1f1b10]">Ing. Laboratorio Central Pintuco</p>
+                  <span>Dirección Técnica y Aseguramiento de Calidad</span>
+                </div>
+                <div className="text-right">
+                  <span className="font-mono text-[11px] text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded font-bold">
+                    FIRMA DIGITAL VALIDADA
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Buttons */}
+            <div className="flex gap-3 pt-6">
+              <button
+                type="button"
+                onClick={() => setShowCertificateModal(false)}
+                className="flex-1 py-3 rounded-xl border border-[#d1c6ab] text-xs font-bold text-[#4d4632] hover:bg-[#f6eddb] cursor-pointer"
+              >
+                Cerrar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  window.print();
+                }}
+                className="flex-1 py-3 rounded-xl bg-[#2f5ea1] hover:bg-[#254b80] text-white text-xs font-bold flex items-center justify-center gap-2 shadow-xs cursor-pointer"
+              >
+                <Download className="w-4 h-4" />
+                <span>Imprimir / Guardar Certificado</span>
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

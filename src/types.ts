@@ -149,6 +149,10 @@ export interface ProjectRequest {
   photoBase64?: string;
   additionalDetails?: string;
   colorFamily?: string;
+  selectedColorHex?: string;
+  selectedColorName?: string;
+  selectedColorCode?: string;
+  selectedColorMode?: 'suggestion' | 'custom_wheel';
   finishPreference?: 'Mate' | 'Satinado' | 'Semibrillante' | 'Brillante' | 'Epóxico Alto Brillo';
   status:
     | 'Registrada'
@@ -164,6 +168,13 @@ export interface ProjectRequest {
   productionOrder?: ProductionOrder;
   assignedAdvisor?: string;
   technicalReviewNotes?: string;
+  trackingNumber?: string;
+  assignedCarrier?: string;
+  dispatchDate?: string;
+  deliveryDate?: string;
+  deliveryNotes?: string;
+  approvedAt?: string;
+  completedAt?: string;
 }
 
 export type UserRole =

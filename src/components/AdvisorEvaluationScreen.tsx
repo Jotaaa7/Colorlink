@@ -43,6 +43,7 @@ interface AdvisorEvaluationScreenProps {
   onOpenLogin: () => void;
   onNavigateHome: () => void;
   onNavigateToInventory?: () => void;
+  onUpdateProject?: (updatedRequest: ProjectRequest) => void;
 }
 
 export const AdvisorEvaluationScreen: React.FC<AdvisorEvaluationScreenProps> = ({
@@ -52,6 +53,7 @@ export const AdvisorEvaluationScreen: React.FC<AdvisorEvaluationScreenProps> = (
   onOpenLogin,
   onNavigateHome,
   onNavigateToInventory,
+  onUpdateProject,
 }) => {
   // Check authorization
   const isAuthorized =
@@ -93,12 +95,12 @@ export const AdvisorEvaluationScreen: React.FC<AdvisorEvaluationScreenProps> = (
   };
 
   // Pricing calculations
-  const subtotal = 419800;
+  const subtotal = request?.quotation?.subtotalCOP || 419800;
   const discountRate = 0.1; // 10%
-  const discountAmount = Math.round(subtotal * discountRate);
+  const discountAmount = request?.quotation?.discountCOP || Math.round(subtotal * discountRate);
   const baseTaxable = subtotal - discountAmount;
-  const ivaAmount = Math.round(baseTaxable * 0.19);
-  const grandTotal = baseTaxable + ivaAmount;
+  const ivaAmount = request?.quotation?.taxCOP || Math.round(baseTaxable * 0.19);
+  const grandTotal = request?.quotation?.totalCOP || baseTaxable + ivaAmount;
 
   // Formatting COP
   const formatCOP = (val: number) => {
@@ -1304,6 +1306,13 @@ export const AdvisorEvaluationScreen: React.FC<AdvisorEvaluationScreenProps> = (
                 type="button"
                 onClick={() => {
                   setShowSapModal(false);
+                  if (request && onUpdateProject) {
+                    onUpdateProject({
+                      ...request,
+                      status: 'Inventario Asignado',
+                      technicalReviewNotes: technicalNotes,
+                    });
+                  }
                   triggerToast('Orden SAP #450098231 creada y sincronizada con éxito');
                 }}
                 className="flex-1 py-2.5 rounded-xl bg-[#2f5ea1] text-white text-xs font-bold hover:bg-[#264b82] transition-colors"
@@ -1345,6 +1354,13 @@ export const AdvisorEvaluationScreen: React.FC<AdvisorEvaluationScreenProps> = (
                 type="button"
                 onClick={() => {
                   setShowApproveModal(false);
+                  if (request && onUpdateProject) {
+                    onUpdateProject({
+                      ...request,
+                      status: 'Inventario Asignado',
+                      technicalReviewNotes: technicalNotes,
+                    });
+                  }
                   triggerToast('¡Proyecto aprobado y notificado al cliente exitosamente!');
                 }}
                 className="flex-1 py-2.5 rounded-xl bg-[#ffd100] text-[#0d4788] text-xs font-black hover:bg-[#ffc800] transition-colors"

@@ -81,6 +81,7 @@ export const NewRequestForm: React.FC<NewRequestFormProps> = ({
   const [selectedColorHex, setSelectedColorHex] = useState('#E28468');
   const [selectedColorName, setSelectedColorName] = useState('Arena Cálido');
   const [selectedColorCode, setSelectedColorCode] = useState('PT-248-A');
+  const [selectedColorMode, setSelectedColorMode] = useState<'suggestion' | 'custom_wheel'>('suggestion');
   const [showColorWheelModal, setShowColorWheelModal] = useState(false);
   const [finishPreference, setFinishPreference] = useState<'Mate' | 'Satinado' | 'Brillante'>('Mate');
 
@@ -141,8 +142,12 @@ export const NewRequestForm: React.FC<NewRequestFormProps> = ({
       environment,
       photoUrl,
       photoBase64,
-      additionalDetails: `${additionalDetails} [Color: ${colorTone}, Acabado: ${finishPreference}]`,
-      colorFamily: colorTone,
+      additionalDetails: `${additionalDetails} [Color: ${selectedColorName} (${selectedColorCode || selectedColorHex}), Acabado: ${finishPreference}]`,
+      colorFamily: selectedColorName,
+      selectedColorHex,
+      selectedColorName,
+      selectedColorCode,
+      selectedColorMode,
       finishPreference,
       status: 'Registrada',
     };
@@ -771,6 +776,7 @@ export const NewRequestForm: React.FC<NewRequestFormProps> = ({
             setSelectedColorHex(result.hex);
             setSelectedColorName(result.name);
             setSelectedColorCode(result.code);
+            setSelectedColorMode(result.mode);
             setColorTone(`${result.name} (${result.code} • ${result.hex})`);
           }}
         />
