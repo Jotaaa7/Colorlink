@@ -35,23 +35,24 @@ app.get("/api/health", (req, res) => {
 
 // AI Diagnostic & Technical Formulation endpoint
 app.post("/api/colorlink/diagnose", async (req, res) => {
-  try {
-    const {
-      clientName,
-      surfaceType,
-      condition,
-      environment,
-      areaM2,
-      city,
-      comments,
-      photoBase64,
-    } = req.body;
+  const {
+    clientName,
+    surfaceType,
+    condition,
+    environment,
+    areaM2,
+    city,
+    comments,
+    photoBase64,
+  } = req.body || {};
 
+  try {
     const ai = getGeminiClient();
 
-    // If Gemini is available, we call gemini-3.7-flash with structured reasoning
+    // If Gemini is available, we call gemini-3.8-flash with structured reasoning
     if (ai) {
-      const prompt = `Eres el Asistente Técnico y Especialista en Recubrimientos de Pintuco para el Ecosistema ColorLink.
+      try {
+        const prompt = `Eres el Asistente Técnico y Especialista en Recubrimientos de Pintuco para el Ecosistema ColorLink.
 Analiza la siguiente solicitud de proyecto de pintura y recubrimiento y genera un diagnóstico técnico experto, recomendación de productos oficiales Pintuco, cálculo de rendimiento, preparación de superficie y pasos operacionales.
 
 DATOS DEL PROYECTO:
@@ -100,33 +101,34 @@ Responde en formato JSON válido con la siguiente estructura exacta:
   "environmentalFactor": "Consideraciones climáticas para ${city || "la zona"} (humedad relativa, temperatura de aplicación recomendada 10°C - 35°C)"
 }`;
 
-      const contents: any[] = [];
-      if (photoBase64 && typeof photoBase64 === "string" && photoBase64.includes("base64,")) {
-        const mimeType = photoBase64.substring(photoBase64.indexOf(":") + 1, photoBase64.indexOf(";"));
-        const data = photoBase64.split("base64,")[1];
-        contents.push({
-          inlineData: {
-            mimeType,
-            data,
+        const contents: any[] = [];
+        if (photoBase64 && typeof photoBase64 === "string" && photoBase64.includes("base64,")) {
+          const mimeType = photoBase64.substring(photoBase64.indexOf(":") + 1, photoBase64.indexOf(";"));
+          const data = photoBase64.split("base64,")[1];
+          contents.push({
+            inlineData: {
+              mimeType,
+              data,
+            },
+          });
+        }
+        contents.push(prompt);
+
+        const response = await ai.models.generateContent({
+          model: "gemini-3.8-flash",
+          contents,
+          config: {
+            responseMimeType: "application/json",
           },
         });
-      }
-      contents.push(prompt);
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3.7-flash",
-        contents,
-        config: {
-          responseMimeType: "application/json",
-        },
-      });
-
-      const text = response.text || "{}";
-      try {
+        const text = response.text || "{}";
         const parsed = JSON.parse(text);
-        return res.json({ success: true, diagnosis: parsed, aiPowered: true });
-      } catch (err) {
-        console.error("Error parsing Gemini JSON:", err);
+        if (parsed && Array.isArray(parsed.recommendedProducts) && parsed.recommendedProducts.length > 0) {
+          return res.json({ success: true, diagnosis: parsed, aiPowered: true });
+        }
+      } catch (geminiErr) {
+        console.warn("Gemini diagnosis generation warning, falling back to deterministic Pintuco engine:", geminiErr);
       }
     }
 
@@ -201,7 +203,37 @@ Responde en formato JSON válido con la siguiente estructura exacta:
     return res.json({ success: true, diagnosis: fallbackDiagnosis, aiPowered: false });
   } catch (error: any) {
     console.error("Error in diagnose endpoint:", error);
-    res.status(500).json({ success: false, error: error?.message || "Internal server error" });
+    // Even in error, return a valid diagnosis structure so client never crashes
+    return res.json({
+      success: true,
+      diagnosis: {
+        diagnosticSummary: `Evaluación Pintuco para ${surfaceType || 'superficie'} en ${city || 'Colombia'}.`,
+        recommendedProducts: [
+          {
+            name: "Viniltex® Avanzado Antibacterial",
+            type: "Acabado Principal",
+            sku: "PT-VX-1010",
+            coverageM2PerGal: 35,
+            recommendedCoats: 2,
+            totalGallonsNeeded: Math.max(1, Math.ceil(((Number(areaM2) || 20) * 2) / 35)),
+            estimatedCostCOP: 94500 * Math.max(1, Math.ceil(((Number(areaM2) || 20) * 2) / 35)),
+            reason: "Alta lavabilidad y durabilidad garantizada Pintuco.",
+          },
+        ],
+        surfacePreparation: ["Limpiar superficie de polvo", "Lijar suavemente"],
+        applicationAdvice: {
+          recommendedTools: ["Rodillo", "Brocha"],
+          dilution: "10% agua",
+          dryingTimeTouch: "1 hora",
+          dryingTimeBetweenCoats: "3 horas",
+          cureTime: "7 días",
+        },
+        qualityCheckpoints: ["Verificar secado"],
+        operationalAlert: "Despacho programado",
+        environmentalFactor: "Clima estándar",
+      },
+      aiPowered: false,
+    });
   }
 });
 
@@ -212,22 +244,26 @@ app.post("/api/colorlink/chat", async (req, res) => {
     const ai = getGeminiClient();
 
     if (ai) {
-      const systemInstruction = `Eres "ColorLink AI", el asesor experto y asistente técnico de recubrimientos de Pintuco Colombia.
+      try {
+        const systemInstruction = `Eres "ColorLink AI", el asesor experto y asistente técnico de recubrimientos de Pintuco Colombia.
 Tu misión es asistir a ingenieros, contratistas, arquitectos y clientes en la selección técnica de pinturas, cálculos de rendimiento, formulaciones especiales, protocolos de calidad, tiempos de secado y resolución de patologías de recubrimiento (ampollamiento, eflorescencia, caleo, corrosión).
 Sé claro, conciso, profesional y cita productos reales Pintuco (Viniltex, Koraza, Pintulux, Madetec, Sellomax, Aquablock, Epóxicos, Uretanos).`;
 
-      const contents = `Contexto del proyecto actual: ${JSON.stringify(projectContext || {})}
+        const contents = `Contexto del proyecto actual: ${JSON.stringify(projectContext || {})}
 Pregunta del usuario: ${message}`;
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3.7-flash",
-        contents,
-        config: {
-          systemInstruction,
-        },
-      });
+        const response = await ai.models.generateContent({
+          model: "gemini-3.8-flash",
+          contents,
+          config: {
+            systemInstruction,
+          },
+        });
 
-      return res.json({ reply: response.text || "Disculpa, no pude procesar la consulta técnica." });
+        return res.json({ reply: response.text || "Disculpa, no pude procesar la consulta técnica." });
+      } catch (geminiChatErr) {
+        console.warn("Gemini chat error, using fallback reply:", geminiChatErr);
+      }
     }
 
     // Responsive fallback reply

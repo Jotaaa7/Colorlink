@@ -203,6 +203,7 @@ export interface UserProfile {
 export type ActiveTab =
   | 'new_request'
   | 'project_status'
+  | 'direct_store'
   | 'advisor_portal'
   | 'advisor_inventory'
   | 'ecosystem_hub'
@@ -213,3 +214,46 @@ export type ActiveTab =
   | 'ai_consultant'
   | 'login'
   | 'register';
+
+export interface DirectCartItem {
+  id: string;
+  sku: string;
+  name: string;
+  category: string;
+  image: string;
+  presentation: 'Cuarto (1/4 Gal)' | 'Galón (1 Gal)' | 'Caneca (5 Gal)' | 'Unidad / Kit';
+  quantity: number;
+  unitPriceCOP: number;
+  totalCOP: number;
+  hasColors?: boolean;
+  selectedColorName?: string;
+  selectedColorHex?: string;
+  selectedColorCode?: string;
+}
+
+export interface DirectOrder {
+  orderId: string;
+  sapOrderNumber: string;
+  createdAt: string;
+  items: DirectCartItem[];
+  customer: {
+    fullName: string;
+    documentType: string;
+    documentNumber: string;
+    email: string;
+    phone: string;
+  };
+  shipping: {
+    city: string;
+    address: string;
+    details?: string;
+    estimatedDeliveryHours: number;
+    shippingCostCOP: number;
+  };
+  paymentMethod: 'PSE' | 'Tarjeta de Crédito' | 'Contraentrega';
+  subtotalCOP: number;
+  taxCOP: number;
+  shippingCOP: number;
+  totalCOP: number;
+  status: 'Confirmado' | 'En Preparación CEDI' | 'Despachado' | 'Entregado';
+}

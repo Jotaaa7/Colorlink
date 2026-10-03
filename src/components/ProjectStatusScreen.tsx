@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { ProjectRequest, QuotationItem } from '../types';
 import { ColorSelectorModal, ColorSelectionResult } from './ColorSelectorModal';
 import { AddProductModal } from './AddProductModal';
+import { getProjectPhaseLockInfo } from '../lib/projectStatusRules';
 import {
   Calendar,
   Clock,
@@ -31,6 +32,9 @@ import {
   Trash2,
   PackagePlus,
   Edit3,
+  Lock,
+  ShoppingBag,
+  ArrowRight,
 } from 'lucide-react';
 
 interface ProjectStatusScreenProps {
@@ -40,6 +44,7 @@ interface ProjectStatusScreenProps {
   onOpenSupport: () => void;
   onNavigateToAdvisorPortal?: () => void;
   onUpdateProject?: (updatedRequest: ProjectRequest) => void;
+  onNavigateToStore?: () => void;
 }
 
 export const ProjectStatusScreen: React.FC<ProjectStatusScreenProps> = ({
@@ -49,6 +54,7 @@ export const ProjectStatusScreen: React.FC<ProjectStatusScreenProps> = ({
   onOpenSupport,
   onNavigateToAdvisorPortal,
   onUpdateProject,
+  onNavigateToStore,
 }) => {
   // Photos Gallery state - incorporates user project photo if uploaded
   const photos = [
@@ -179,8 +185,17 @@ export const ProjectStatusScreen: React.FC<ProjectStatusScreenProps> = ({
     }
   };
 
-  // Add product handler
+  // Derived project values or fallbacks matching mockup
+  const projectCode = request?.id || 'PTC-2024-8924';
+  const projectCity = request?.city ? `${request.city}, Colombia` : 'Bogotá, D.C.';
+  const projectAddress = request?.address || 'Calle 127 # 19-45, Apto 402, Bogotá';
+  const projectArea = request?.areaM2 || 45;
+  const currentStatus = request?.status || 'Cotizada';
+  const lockInfo = getProjectPhaseLockInfo(currentStatus);
+
+  // Add product handler (strictly blocked in production/logistics/completed phases)
   const handleAddProduct = (newItem: QuotationItem) => {
+    if (!lockInfo.canAddProducts) return;
     const updated = [...projectItems, newItem];
     setProjectItems(updated);
     syncProjectUpdate(updated);
@@ -188,6 +203,7 @@ export const ProjectStatusScreen: React.FC<ProjectStatusScreenProps> = ({
 
   // Remove product handler
   const handleRemoveProduct = (indexToRemove: number) => {
+    if (!lockInfo.canRemoveProducts) return;
     const updated = projectItems.filter((_, idx) => idx !== indexToRemove);
     setProjectItems(updated);
     syncProjectUpdate(updated);
@@ -195,6 +211,7 @@ export const ProjectStatusScreen: React.FC<ProjectStatusScreenProps> = ({
 
   // Apply color selection handler
   const handleApplyColorSelection = (result: ColorSelectionResult) => {
+    if (!lockInfo.canChangeColors) return;
     if (colorModalTargetIndex === null) return;
     const targetItem = projectItems[colorModalTargetIndex];
     if (!targetItem) return;
@@ -227,13 +244,6 @@ export const ProjectStatusScreen: React.FC<ProjectStatusScreenProps> = ({
       maximumFractionDigits: 0,
     }).format(val);
   };
-
-  // Derived project values or fallbacks matching mockup
-  const projectCode = request?.id || 'PTC-2024-8924';
-  const projectCity = request?.city ? `${request.city}, Colombia` : 'Bogotá, D.C.';
-  const projectAddress = request?.address || 'Calle 127 # 19-45, Apto 402, Bogotá';
-  const projectArea = request?.areaM2 || 45;
-  const currentStatus = request?.status || 'Cotizada';
 
   const createdAtFormatted = request?.createdAt
     ? new Date(request.createdAt).toLocaleDateString('es-CO', {
@@ -930,16 +940,42 @@ export const ProjectStatusScreen: React.FC<ProjectStatusScreenProps> = ({
               </div>
 
               {/* Add Product Manually Button */}
-              <button
-                type="button"
-                onClick={() => setIsAddProductModalOpen(true)}
-                className="inline-flex items-center justify-center gap-2 bg-[#ffd100] hover:bg-[#ffc800] text-[#1f1b10] font-black text-xs px-4 py-2.5 rounded-full shadow-2xs hover:shadow-xs transition-all cursor-pointer"
-                id="btn-add-product-project-status"
-              >
-                <PackagePlus className="w-4 h-4" />
-                <span>+ Agregar Producto al Proyecto</span>
-              </button>
+              {lockInfo.canAddProducts ? (
+                <button
+                  type="button"
+                  onClick={() => setIsAddProductModalOpen(true)}
+                  className="inline-flex items-center justify-center gap-2 bg-[#ffd100] hover:bg-[#ffc800] text-[#1f1b10] font-black text-xs px-4 py-2.5 rounded-full shadow-2xs hover:shadow-xs transition-all cursor-pointer"
+                  id="btn-add-product-project-status"
+                >
+                  <PackagePlus className="w-4 h-4" />
+                  <span>+ Agregar Producto al Proyecto</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  disabled
+                  className="inline-flex items-center justify-center gap-2 bg-[#f0e7d5] text-[#7f765f] font-bold text-xs px-4 py-2.5 rounded-full border border-[#d1c6ab] cursor-not-allowed opacity-80"
+                  title={lockInfo.reason}
+                  id="btn-add-product-project-status"
+                >
+                  <Lock className="w-4 h-4 text-[#7f765f]" />
+                  <span>Agregar Producto (Bloqueado)</span>
+                </button>
+              )}
             </div>
+
+            {/* Locked Phase Alert Banner */}
+            {!lockInfo.canAddProducts && (
+              <div className="p-3.5 rounded-xl bg-[#fcf3e0] border border-[#d1c6ab] flex items-start gap-3 text-xs text-[#4d4632]">
+                <Lock className="w-4 h-4 text-[#725c00] shrink-0 mt-0.5" />
+                <div>
+                  <strong className="text-[#1f1b10] block font-bold">
+                    Formulación de productos bloqueada ({lockInfo.badgeLabel}):
+                  </strong>
+                  <span>{lockInfo.reason}</span>
+                </div>
+              </div>
+            )}
 
             {/* Quick Specs: Area & Prescribed System */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1059,22 +1095,32 @@ export const ProjectStatusScreen: React.FC<ProjectStatusScreenProps> = ({
                         </div>
 
                         {/* Button to choose between suggestion or color wheel */}
-                        <button
-                          type="button"
-                          onClick={() => setColorModalTargetIndex(idx)}
-                          className="px-3.5 py-2 rounded-xl bg-white hover:bg-[#ebe2cf] text-[#1f1b10] font-bold text-xs flex items-center justify-center gap-1.5 border border-[#d1c6ab] shadow-2xs transition-colors cursor-pointer shrink-0"
-                          id={`btn-edit-color-${idx}`}
-                        >
-                          <Palette className="w-3.5 h-3.5 text-[#725c00]" />
-                          <span>Elegir / Cambiar Color</span>
-                        </button>
+                        {lockInfo.canChangeColors ? (
+                          <button
+                            type="button"
+                            onClick={() => setColorModalTargetIndex(idx)}
+                            className="px-3.5 py-2 rounded-xl bg-white hover:bg-[#ebe2cf] text-[#1f1b10] font-bold text-xs flex items-center justify-center gap-1.5 border border-[#d1c6ab] shadow-2xs transition-colors cursor-pointer shrink-0"
+                            id={`btn-edit-color-${idx}`}
+                          >
+                            <Palette className="w-3.5 h-3.5 text-[#725c00]" />
+                            <span>Elegir / Cambiar Color</span>
+                          </button>
+                        ) : (
+                          <div
+                            className="px-3 py-1.5 rounded-xl bg-[#f6eddb] text-[#7f765f] text-xs font-semibold flex items-center gap-1.5 border border-[#ebe2cf] shrink-0"
+                            title={lockInfo.shortWarning}
+                          >
+                            <Lock className="w-3.5 h-3.5" />
+                            <span>Color Asignado en Planta</span>
+                          </div>
+                        )}
                       </div>
                     ) : (
                       <div className="flex items-center justify-between text-xs text-[#7f765f] pt-1">
                         <span className="italic">
                           Fórmula incolora / acabado transparente o accesorio estándar
                         </span>
-                        {item.isCustomManual && (
+                        {item.isCustomManual && lockInfo.canRemoveProducts && (
                           <button
                             type="button"
                             onClick={() => handleRemoveProduct(idx)}
@@ -1093,14 +1139,23 @@ export const ProjectStatusScreen: React.FC<ProjectStatusScreenProps> = ({
 
             {/* Bottom Add Product Action Banner */}
             <div className="pt-2 flex flex-col sm:flex-row items-center justify-between gap-3">
-              <button
-                type="button"
-                onClick={() => setIsAddProductModalOpen(true)}
-                className="w-full sm:w-auto py-3 px-6 rounded-2xl bg-[#f6eddb] hover:bg-[#ebe2cf] text-[#1f1b10] text-xs sm:text-sm font-bold flex items-center justify-center gap-2 transition-colors border border-[#d1c6ab] cursor-pointer"
-              >
-                <Plus className="w-4 h-4 text-[#725c00]" />
-                <span>+ Agregar otro producto o insumo manualmente</span>
-              </button>
+              {lockInfo.canAddProducts ? (
+                <button
+                  type="button"
+                  onClick={() => setIsAddProductModalOpen(true)}
+                  className="w-full sm:w-auto py-3 px-6 rounded-2xl bg-[#f6eddb] hover:bg-[#ebe2cf] text-[#1f1b10] text-xs sm:text-sm font-bold flex items-center justify-center gap-2 transition-colors border border-[#d1c6ab] cursor-pointer"
+                >
+                  <Plus className="w-4 h-4 text-[#725c00]" />
+                  <span>+ Agregar otro producto o insumo manualmente</span>
+                </button>
+              ) : (
+                <div className="flex items-center gap-2 text-xs text-[#7f765f] bg-[#fcf3e0] px-4 py-2.5 rounded-xl border border-[#ebe2cf]">
+                  <Lock className="w-4 h-4 text-[#7f765f] shrink-0" />
+                  <span>
+                    No es posible agregar insumos en estado <strong>"{currentStatus}"</strong> ({lockInfo.badgeLabel}).
+                  </span>
+                </div>
+              )}
 
               <div className="text-right text-xs text-[#4d4632]">
                 <span>Total Materiales Estimado: </span>
@@ -1538,6 +1593,7 @@ export const ProjectStatusScreen: React.FC<ProjectStatusScreenProps> = ({
           isOpen={isAddProductModalOpen}
           onClose={() => setIsAddProductModalOpen(false)}
           onAddProduct={handleAddProduct}
+          projectStatus={currentStatus}
         />
       )}
 

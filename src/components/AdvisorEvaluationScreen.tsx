@@ -1,5 +1,13 @@
 import React, { useState } from 'react';
-import { UserProfile, ProjectRequest } from '../types';
+import { UserProfile, ProjectRequest, QuotationItem } from '../types';
+import { PintucoCatalogItem } from '../data/pintucoProducts';
+import { AdvisorSidebar, AdvisorNavTab } from './advisor/AdvisorSidebar';
+import { AdvisorRequestsView } from './advisor/AdvisorRequestsView';
+import { AdvisorCatalogView } from './advisor/AdvisorCatalogView';
+import { AdvisorInventoryView } from './advisor/AdvisorInventoryView';
+import { AdvisorHistoryView } from './advisor/AdvisorHistoryView';
+import { AdvisorStatusModal, ValidProjectStatus } from './advisor/AdvisorStatusModal';
+import { getProjectPhaseLockInfo } from '../lib/projectStatusRules';
 import {
   Lock,
   ShieldAlert,
@@ -12,6 +20,7 @@ import {
   Bell,
   User,
   ChevronRight,
+  ChevronDown,
   Save,
   FileDown,
   Send,
@@ -22,18 +31,29 @@ import {
   Palette,
   Calculator,
   Sliders,
+  SlidersHorizontal,
   Receipt,
   Truck,
   MessageCircle,
   FileSpreadsheet,
   Check,
   X,
+  Plus,
+  Minus,
+  Trash2,
   Printer,
   ArrowRight,
   HelpCircle,
   Info,
   LogOut,
   Layers,
+  Menu,
+  Clock,
+  ExternalLink,
+  Factory,
+  RefreshCw,
+  Warehouse,
+  FileText,
 } from 'lucide-react';
 
 interface AdvisorEvaluationScreenProps {
@@ -62,11 +82,17 @@ export const AdvisorEvaluationScreen: React.FC<AdvisorEvaluationScreenProps> = (
       currentUser.role === 'Asesor Comercial / Técnico' ||
       currentUser.role === 'Administrador Pintuco');
 
-  // State for interactive features in the screen
+  // Sidebar navigation and layout state
+  const [activeAdvisorNav, setActiveAdvisorNav] = useState<AdvisorNavTab>('diagnostico');
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isOpenMobileSidebar, setIsOpenMobileSidebar] = useState(false);
+
+  // Active project under diagnostic inspection
+  const [activeRequest, setActiveRequest] = useState<ProjectRequest | null>(request);
+  const lockInfo = getProjectPhaseLockInfo(activeRequest?.status);
+
+  // Interactive diagnostic state
   const [mermaPercent, setMermaPercent] = useState<number>(8);
-  const [activeAdvisorNav, setActiveAdvisorNav] = useState<
-    'solicitudes' | 'diagnostico' | 'catalogo' | 'historial'
-  >('diagnostico');
   const [searchQuery, setSearchQuery] = useState('');
 
   // Pathologies state
@@ -81,26 +107,251 @@ export const AdvisorEvaluationScreen: React.FC<AdvisorEvaluationScreenProps> = (
     'Se prescribe aplicación rigurosa de 1 mano homogénea de Sellador 501 para uniformar absorción y maximizar el cubrimiento del Viniltex Avanzado. Garantía de fábrica certificada por 5 años contra decoloración y desprendimiento.'
   );
 
+  // Interactive quotation line items state
+  const defaultItems: QuotationItem[] = [
+    {
+      sku: '1024589',
+      name: 'Viniltex Avanzado Antibacterial (Salmón Terracota #248-A)',
+      type: 'Pintura Acabado',
+      unit: 'Galón',
+      quantity: 1,
+      unitPriceCOP: 115900,
+      totalCOP: 115900,
+      hasColors: true,
+      selectedColorName: 'Salmón Terracota',
+      selectedColorHex: '#df8c72',
+      selectedColorCode: '248-A',
+    },
+    {
+      sku: '1024590',
+      name: 'Viniltex Avanzado Antibacterial (Salmón Terracota #248-A)',
+      type: 'Pintura Acabado',
+      unit: 'Cuarto (1/4 Gal)',
+      quantity: 2,
+      unitPriceCOP: 34000,
+      totalCOP: 68000,
+      hasColors: true,
+      selectedColorName: 'Salmón Terracota',
+      selectedColorHex: '#df8c72',
+      selectedColorCode: '248-A',
+    },
+    {
+      sku: '1024501',
+      name: 'Viniltex Avanzado Antibacterial (Blanco Lienzo #100-B)',
+      type: 'Pintura Acabado',
+      unit: 'Galón',
+      quantity: 1,
+      unitPriceCOP: 112900,
+      totalCOP: 112900,
+      hasColors: true,
+      selectedColorName: 'Blanco Lienzo',
+      selectedColorHex: '#f7f5ed',
+      selectedColorCode: '100-B',
+    },
+    {
+      sku: '1018944',
+      name: 'Sellador Acrílico Antihumedad 501',
+      type: 'Imprimante',
+      unit: 'Galón',
+      quantity: 1,
+      unitPriceCOP: 74500,
+      totalCOP: 74500,
+      hasColors: false,
+    },
+    {
+      sku: 'ACC-KIT-PRO',
+      name: 'Kit de Aplicación & Resane Pro (Rodillo + Cinta + Masilla)',
+      type: 'Herramientas',
+      unit: 'Kit Completo',
+      quantity: 1,
+      unitPriceCOP: 48500,
+      totalCOP: 48500,
+      hasColors: false,
+    },
+  ];
+
+  const [quoteItems, setQuoteItems] = useState<QuotationItem[]>(() => {
+    if (activeRequest?.quotation?.items && activeRequest.quotation.items.length > 0) {
+      return activeRequest.quotation.items;
+    }
+    return defaultItems;
+  });
+
   // Modals state
   const [showPdfModal, setShowPdfModal] = useState(false);
   const [showSapModal, setShowSapModal] = useState(false);
   const [showApproveModal, setShowApproveModal] = useState(false);
-  const [showNotificationToast, setShowNotificationToast] = useState<string | null>(null);
+  const [showStatusModal, setShowStatusModal] = useState(false);
+  const [notificationToast, setNotificationToast] = useState<string | null>(null);
 
   const triggerToast = (msg: string) => {
-    setShowNotificationToast(msg);
+    setNotificationToast(msg);
     setTimeout(() => {
-      setShowNotificationToast(null);
+      setNotificationToast(null);
     }, 4000);
   };
 
-  // Pricing calculations
-  const subtotal = request?.quotation?.subtotalCOP || 419800;
-  const discountRate = 0.1; // 10%
-  const discountAmount = request?.quotation?.discountCOP || Math.round(subtotal * discountRate);
+  const handleSaveProjectStatus = (
+    newStatus: ValidProjectStatus,
+    advisorNote?: string,
+    trackingNumber?: string
+  ) => {
+    if (!activeRequest) return;
+    const updatedRequest: ProjectRequest = {
+      ...activeRequest,
+      status: newStatus,
+      technicalReviewNotes: advisorNote || activeRequest.technicalReviewNotes,
+      trackingNumber: trackingNumber || activeRequest.trackingNumber,
+      ...(newStatus === 'Aprobada QA' || newStatus === 'Inventario Asignado'
+        ? { approvedAt: activeRequest.approvedAt || new Date().toISOString() }
+        : {}),
+      ...(newStatus === 'Completada' ? { completedAt: new Date().toISOString() } : {}),
+    };
+    setActiveRequest(updatedRequest);
+    if (onUpdateProject) {
+      onUpdateProject(updatedRequest);
+    }
+    triggerToast(`Estado del proyecto ${projectCode} actualizado a: "${newStatus}" exitosamente`);
+  };
+
+  // Helper for status badge, colors and progress
+  const getStatusDetails = (status: string) => {
+    switch (status) {
+      case 'Completada':
+        return {
+          phaseLabel: 'Fase 5 de 5',
+          phaseName: 'Entregado en Obra',
+          badgeBg: 'bg-[#dcfce7] text-[#166534] border-[#86efac]',
+          icon: Truck,
+          stepNumber: 5,
+          percent: 100,
+        };
+      case 'Aprobada QA':
+        return {
+          phaseLabel: 'Fase 4 de 5',
+          phaseName: 'Calidad Certificada QA',
+          badgeBg: 'bg-[#ecfdf5] text-[#047857] border-[#a7f3d0]',
+          icon: ShieldCheck,
+          stepNumber: 4,
+          percent: 90,
+        };
+      case 'En Producción':
+        return {
+          phaseLabel: 'Fase 4 de 5',
+          phaseName: 'En Fabricación y Mezcla',
+          badgeBg: 'bg-[#e1edff] text-[#0d4788] border-[#bfdbfe]',
+          icon: Factory,
+          stepNumber: 4,
+          percent: 80,
+        };
+      case 'Inventario Asignado':
+        return {
+          phaseLabel: 'Fase 4 de 5',
+          phaseName: 'Lote Bloqueado SAP',
+          badgeBg: 'bg-[#e6f4ea] text-[#137333] border-[#bbf7d0]',
+          icon: Warehouse,
+          stepNumber: 4,
+          percent: 70,
+        };
+      case 'Cotizada':
+        return {
+          phaseLabel: 'Fase 3 de 5',
+          phaseName: 'Cotización Oficial Emitida',
+          badgeBg: 'bg-[#ffe07f] text-[#231b00] border-[#fde047]',
+          icon: FileText,
+          stepNumber: 3,
+          percent: 55,
+        };
+      case 'Analizada por IA':
+        return {
+          phaseLabel: 'Fase 2 de 5',
+          phaseName: 'Diagnóstico IA Completado',
+          badgeBg: 'bg-[#d6e3ff] text-[#001b3d] border-[#bfdbfe]',
+          icon: Sparkles,
+          stepNumber: 2,
+          percent: 35,
+        };
+      default:
+        return {
+          phaseLabel: 'Fase 1 de 5',
+          phaseName: 'Solicitud Recibida',
+          badgeBg: 'bg-[#f6eddb] text-[#725c00] border-[#d1c6ab]',
+          icon: Clock,
+          stepNumber: 1,
+          percent: 20,
+        };
+    }
+  };
+
+  // Quantity adjusting handlers
+  const handleUpdateItemQty = (index: number, delta: number) => {
+    if (!lockInfo.canEditQuantities) {
+      triggerToast(
+        `Modificación bloqueada: No se pueden alterar cantidades en fase "${activeRequest?.status}" (${lockInfo.badgeLabel}).`
+      );
+      return;
+    }
+    setQuoteItems((prev) => {
+      const copy = [...prev];
+      const item = copy[index];
+      const newQty = Math.max(1, item.quantity + delta);
+      copy[index] = {
+        ...item,
+        quantity: newQty,
+        totalCOP: Math.round(newQty * item.unitPriceCOP),
+      };
+      return copy;
+    });
+  };
+
+  const handleDeleteItem = (index: number) => {
+    if (!lockInfo.canRemoveProducts) {
+      triggerToast(
+        `Eliminación bloqueada: No se pueden quitar productos en fase "${activeRequest?.status}" (${lockInfo.badgeLabel}).`
+      );
+      return;
+    }
+    setQuoteItems((prev) => prev.filter((_, i) => i !== index));
+    triggerToast('Ítem eliminado de la propuesta');
+  };
+
+  const handleAddProductToQuote = (prod: PintucoCatalogItem) => {
+    if (!lockInfo.canAddProducts) {
+      triggerToast(
+        `Acción bloqueada: No se pueden agregar productos a un proyecto en fase "${activeRequest?.status}" (${lockInfo.badgeLabel}).`
+      );
+      return;
+    }
+    const newItem: QuotationItem = {
+      sku: prod.sku,
+      name: prod.name,
+      type: prod.category,
+      unit: 'Galón',
+      quantity: 1,
+      unitPriceCOP: prod.priceCOP,
+      totalCOP: prod.priceCOP,
+      hasColors: prod.hasColors,
+    };
+    setQuoteItems((prev) => [newItem, ...prev]);
+    setActiveAdvisorNav('diagnostico');
+    triggerToast(`"${prod.name}" añadido a la cotización activa`);
+  };
+
+  const handleSelectRequestForDiagnosis = (selectedReq: ProjectRequest) => {
+    setActiveRequest(selectedReq);
+    if (selectedReq.quotation?.items && selectedReq.quotation.items.length > 0) {
+      setQuoteItems(selectedReq.quotation.items);
+    }
+    setActiveAdvisorNav('diagnostico');
+  };
+
+  // Dynamic Pricing calculations
+  const subtotal = quoteItems.reduce((acc, curr) => acc + curr.totalCOP, 0);
+  const discountRate = 0.1; // 10% asesor standard discount
+  const discountAmount = Math.round(subtotal * discountRate);
   const baseTaxable = subtotal - discountAmount;
-  const ivaAmount = request?.quotation?.taxCOP || Math.round(baseTaxable * 0.19);
-  const grandTotal = request?.quotation?.totalCOP || baseTaxable + ivaAmount;
+  const ivaAmount = Math.round(baseTaxable * 0.19);
+  const grandTotal = baseTaxable + ivaAmount;
 
   // Formatting COP
   const formatCOP = (val: number) => {
@@ -112,10 +363,10 @@ export const AdvisorEvaluationScreen: React.FC<AdvisorEvaluationScreenProps> = (
   };
 
   // Client display metadata
-  const clientName = request?.client?.fullName || 'Andrés Cepeda';
-  const clientAddress = request?.address || 'Bogotá, Calle 127 # 19-45';
-  const projectCode = request?.id || 'PTC-2024-8924';
-  const projectArea = request?.areaM2 || 45;
+  const clientName = activeRequest?.client?.fullName || 'Andrés Cepeda';
+  const clientAddress = activeRequest?.address || 'Bogotá, Calle 127 # 19-45';
+  const projectCode = activeRequest?.id || 'PTC-2024-8924';
+  const projectArea = activeRequest?.areaM2 || 45;
 
   // =========================================================================
   // 1. RESTRICTED ACCESS SCREEN (If user is NOT an Advisor or Admin)
@@ -124,11 +375,9 @@ export const AdvisorEvaluationScreen: React.FC<AdvisorEvaluationScreenProps> = (
     return (
       <div className="min-h-[80vh] bg-[#fff8f0] flex items-center justify-center p-4 md:p-8">
         <div className="max-w-2xl w-full bg-white rounded-3xl shadow-xl border border-[#ebe2cf] p-6 sm:p-10 relative overflow-hidden">
-          {/* Decorative background accent */}
           <div className="absolute -right-20 -top-20 w-64 h-64 bg-[#ffd100]/20 rounded-full blur-3xl pointer-events-none"></div>
 
           <div className="flex flex-col items-center text-center">
-            {/* Lock / Restricted Badge */}
             <div className="w-20 h-20 rounded-3xl bg-[#ffdad6] text-[#ba1a1a] flex items-center justify-center shadow-inner mb-6 border border-[#ba1a1a]/20">
               <Lock className="w-10 h-10 stroke-[2.2]" />
             </div>
@@ -148,7 +397,6 @@ export const AdvisorEvaluationScreen: React.FC<AdvisorEvaluationScreenProps> = (
               <strong> márgenes comerciales</strong> y emisión directa de <strong>órdenes SAP</strong>.
             </p>
 
-            {/* Current Session Info */}
             <div className="w-full bg-[#fcf3e0] border border-[#ebe2cf] rounded-2xl p-4 mb-8 text-left flex items-center justify-between gap-4">
               <div>
                 <span className="text-[11px] font-bold text-[#7f765f] uppercase tracking-wider block">
@@ -164,15 +412,14 @@ export const AdvisorEvaluationScreen: React.FC<AdvisorEvaluationScreenProps> = (
               </span>
             </div>
 
-            {/* Action Buttons to gain authorized access */}
             <div className="w-full flex flex-col sm:flex-row gap-3 justify-center">
               <button
                 type="button"
                 onClick={onSwitchToAdvisorAccount}
-                className="w-full sm:w-auto px-6 py-3.5 rounded-xl bg-[#ffd100] hover:bg-[#ffc800] text-[#6f5a00] font-black text-sm shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
+                className="w-full sm:w-auto px-6 py-3.5 rounded-xl bg-[#ffd100] hover:bg-[#ffc800] text-[#0d4788] font-black text-sm shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
                 id="btn-unlock-advisor-demo"
               >
-                <UserCheck className="w-5 h-5 text-[#6f5a00]" />
+                <UserCheck className="w-5 h-5 text-[#0d4788]" />
                 <span>Ingresar como Asesor Técnico Pintuco (Demo 1-Clic)</span>
               </button>
 
@@ -188,7 +435,7 @@ export const AdvisorEvaluationScreen: React.FC<AdvisorEvaluationScreenProps> = (
             <button
               type="button"
               onClick={onNavigateHome}
-              className="mt-6 text-xs font-bold text-[#7f765f] hover:text-[#1f1b10] transition-colors underline decoration-dotted"
+              className="mt-6 text-xs font-bold text-[#7f765f] hover:text-[#1f1b10] transition-colors underline decoration-dotted cursor-pointer"
             >
               Volver al Portal de Cliente y Solicitudes
             </button>
@@ -198,969 +445,805 @@ export const AdvisorEvaluationScreen: React.FC<AdvisorEvaluationScreenProps> = (
     );
   }
 
+  // Active view title mapping
+  const getNavTitle = (tab: AdvisorNavTab) => {
+    switch (tab) {
+      case 'diagnostico':
+        return 'Diagnóstico & Evaluación IA';
+      case 'solicitudes':
+        return 'Solicitudes Pendientes';
+      case 'inventario':
+        return 'Inventario Multisede & Bloqueo SAP';
+      case 'catalogo':
+        return 'Catálogo Técnico Pintuco';
+      case 'historial':
+        return 'Historial de Cotizaciones & Órdenes';
+    }
+  };
+
   // =========================================================================
-  // 2. AUTHORIZED SCREEN: PINTUCO PRO - EVALUACIÓN TÉCNICA & COTIZACIÓN
+  // 2. AUTHORIZED SCREEN: PINTUCO PRO - WITH SIDEBAR NAVIGATION
   // =========================================================================
   return (
-    <div className="min-h-screen bg-[#fff8f0] text-[#1f1b10] font-sans antialiased pb-16">
+    <div className="min-h-screen bg-[#fff8f0] text-[#1f1b10] font-sans antialiased flex flex-col">
       {/* Toast notification */}
-      {showNotificationToast && (
+      {notificationToast && (
         <div className="fixed top-24 right-6 z-50 bg-[#1f1b10] text-white px-5 py-3.5 rounded-2xl shadow-2xl flex items-center gap-3 border border-[#ffd100] animate-bounce">
           <CheckCircle2 className="w-5 h-5 text-[#ffd100] shrink-0" />
-          <span className="text-xs sm:text-sm font-bold">{showNotificationToast}</span>
+          <span className="text-xs sm:text-sm font-bold">{notificationToast}</span>
         </div>
       )}
 
       {/* ===================================================================
-          PINTUCO PRO ADVISOR NAVBAR
+          SIDEBAR (BARRA LATERAL) COMPONENT
           =================================================================== */}
-      <div className="w-full bg-[#fff8f0]/95 backdrop-blur-xl border-b border-[#ebe2cf] shadow-xs">
-        <div className="h-20 w-full px-4 sm:px-6 lg:px-8 flex items-center justify-between gap-4 max-w-[1440px] mx-auto">
-          {/* Logo & Brand Identity */}
-          <div className="flex items-center gap-4 shrink-0">
-            <div className="flex items-center gap-1.5">
-              <div className="bg-[#ffd100] text-[#6f5a00] px-3 py-1 rounded-lg text-xl sm:text-2xl font-black tracking-tight shadow-xs">
-                PINTUCO
-              </div>
-              <span className="text-sm font-black text-[#725c00] tracking-wider">PRO</span>
-            </div>
-
-            <div className="h-6 w-px bg-[#d1c6ab] hidden sm:block"></div>
-
-            <div className="hidden sm:flex items-center gap-1.5 px-3 py-1 bg-[#f6eddb] rounded-lg border border-[#d1c6ab]/40">
-              <span className="text-xs text-[#4d4632] font-medium">Rol:</span>
-              <span className="text-xs text-[#1f1b10] font-bold">Portal Técnico Asesor</span>
-            </div>
-          </div>
-
-          {/* Search bar */}
-          <div className="hidden xl:flex items-center flex-1 max-w-xs relative">
-            <div className="w-full flex items-center bg-white rounded-xl px-3.5 py-2 border border-[#d1c6ab]/50 shadow-2xs">
-              <Search className="w-4 h-4 text-[#7f765f] mr-2 shrink-0" />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Buscar expediente / radicado..."
-                className="w-full bg-transparent text-xs text-[#1f1b10] placeholder:text-[#7f765f] focus:outline-none font-medium"
-              />
-            </div>
-          </div>
-
-          {/* Advisor Top Navigation */}
-          <nav className="hidden lg:flex items-center gap-1">
-            <button
-              onClick={() => setActiveAdvisorNav('solicitudes')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                activeAdvisorNav === 'solicitudes'
-                  ? 'bg-[#ffd100] text-[#6f5a00] font-bold shadow-2xs'
-                  : 'text-[#4d4632] hover:bg-[#f0e7d5] hover:text-[#1f1b10]'
-              }`}
-            >
-              Solicitudes Pendientes
-            </button>
-            <button
-              onClick={() => setActiveAdvisorNav('diagnostico')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                activeAdvisorNav === 'diagnostico'
-                  ? 'bg-[#ffd100] text-[#6f5a00] font-bold shadow-2xs'
-                  : 'text-[#4d4632] hover:bg-[#f0e7d5] hover:text-[#1f1b10]'
-              }`}
-            >
-              Diagnóstico & IA
-            </button>
-            <button
-              onClick={() => onNavigateToInventory ? onNavigateToInventory() : setActiveAdvisorNav('inventario')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                activeAdvisorNav === 'inventario'
-                  ? 'bg-[#ffd100] text-[#6f5a00] font-bold shadow-2xs'
-                  : 'text-[#4d4632] hover:bg-[#f0e7d5] hover:text-[#1f1b10]'
-              }`}
-            >
-              Inventario & Disponibilidad
-            </button>
-            <button
-              onClick={() => setActiveAdvisorNav('catalogo')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                activeAdvisorNav === 'catalogo'
-                  ? 'bg-[#ffd100] text-[#6f5a00] font-bold shadow-2xs'
-                  : 'text-[#4d4632] hover:bg-[#f0e7d5] hover:text-[#1f1b10]'
-              }`}
-            >
-              Catálogo Técnico
-            </button>
-            <button
-              onClick={() => setActiveAdvisorNav('historial')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                activeAdvisorNav === 'historial'
-                  ? 'bg-[#ffd100] text-[#6f5a00] font-bold shadow-2xs'
-                  : 'text-[#4d4632] hover:bg-[#f0e7d5] hover:text-[#1f1b10]'
-              }`}
-            >
-              Historial de Cotizaciones
-            </button>
-          </nav>
-
-          {/* Right Status & Advisor Profile */}
-          <div className="flex items-center gap-3 shrink-0">
-            <div className="hidden md:flex items-center gap-1.5 px-3 py-1 bg-[#fcf3e0] rounded-full border border-[#d1c6ab]/40">
-              <span className="w-2.5 h-2.5 rounded-full bg-[#2f5ea1] animate-pulse"></span>
-              <span className="text-xs text-[#4d4632] font-semibold">En línea</span>
-            </div>
-
-            {/* Notification Bell */}
-            <div className="relative p-2 rounded-xl text-[#4d4632] hover:bg-[#f0e7d5] transition-colors cursor-pointer">
-              <Bell className="w-5 h-5" />
-              <span className="absolute 1 right-1 bg-[#c00014] text-white text-[10px] w-4 h-4 rounded-full flex items-center justify-center font-bold">
-                3
-              </span>
-            </div>
-
-            {/* User Profile */}
-            <div className="flex items-center gap-2 pl-2 border-l border-[#d1c6ab]">
-              <div className="hidden sm:flex flex-col text-right">
-                <span className="text-xs font-bold text-[#1f1b10] leading-tight">
-                  {currentUser?.fullName || 'Ing. Carlos Ruiz'}
-                </span>
-                <span className="text-[11px] text-[#7f765f] leading-tight">
-                  Consultor Técnico Senior
-                </span>
-              </div>
-              <div className="w-9 h-9 rounded-full bg-[#725c00] text-white flex items-center justify-center shadow-xs">
-                <User className="w-4 h-4 text-white" />
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+      <AdvisorSidebar
+        activeNav={activeAdvisorNav}
+        onSelectNav={(tab) => {
+          setActiveAdvisorNav(tab);
+          triggerToast(`Sección "${getNavTitle(tab)}" cargada correctamente`);
+        }}
+        currentUser={currentUser}
+        isCollapsed={isSidebarCollapsed}
+        onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+        onNavigateHome={onNavigateHome}
+        onOpenLogin={onOpenLogin}
+        isOpenMobile={isOpenMobileSidebar}
+        onCloseMobile={() => setIsOpenMobileSidebar(false)}
+        pendingCount={4}
+      />
 
       {/* ===================================================================
-          TOP COMMAND & BREADCRUMB STRIP
+          MAIN CONTENT AREA (SHIFTS WITH SIDEBAR WIDTH)
           =================================================================== */}
-      <section className="w-full bg-[#fcf3e0] px-4 sm:px-6 lg:px-8 py-5 border-b border-[#ebe2cf]">
-        <div className="max-w-[1400px] mx-auto flex flex-col gap-3">
-          {/* Breadcrumb and Expediente Badge */}
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-1.5 text-xs text-[#7f765f]">
-              <span className="hover:text-[#725c00] transition-colors cursor-pointer">
-                Asesorías Activas
-              </span>
-              <ChevronRight className="w-3.5 h-3.5 text-[#7f765f]" />
-              <span className="text-xs text-[#1f1b10] font-bold bg-[#f0e7d5] px-2.5 py-0.5 rounded border border-[#d1c6ab]/40">
-                {projectCode}
-              </span>
-              <ChevronRight className="w-3.5 h-3.5 text-[#7f765f]" />
-              <span className="text-[#4d4632] font-semibold">Diagnóstico & Cotización IA</span>
+      <div
+        className={`flex-1 flex flex-col transition-all duration-300 min-h-screen ${
+          isSidebarCollapsed ? 'lg:ml-20' : 'lg:ml-72'
+        }`}
+      >
+        {/* Top Header Command Bar */}
+        <header className="sticky top-0 z-30 bg-[#fff8f0]/95 backdrop-blur-md border-b border-[#ebe2cf] shadow-2xs">
+          <div className="h-16 px-4 sm:px-6 lg:px-8 flex items-center justify-between gap-4">
+            {/* Left: Mobile hamburger & breadcrumb */}
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setIsOpenMobileSidebar(true)}
+                className="lg:hidden p-2 rounded-xl bg-white border border-[#ebe2cf] text-[#4d4632] hover:bg-[#f6eddb] transition-colors"
+                title="Abrir menú lateral"
+              >
+                <Menu className="w-5 h-5" />
+              </button>
+
+              <div className="flex items-center gap-2 text-xs">
+                <span className="text-[#7f765f] hidden sm:inline">Portal Asesor</span>
+                <ChevronRight className="w-3.5 h-3.5 text-[#d1c6ab] hidden sm:inline" />
+                <span className="font-bold text-[#1f1b10] bg-[#f6eddb] px-2.5 py-1 rounded-lg border border-[#ebe2cf]">
+                  {getNavTitle(activeAdvisorNav)}
+                </span>
+                {activeRequest && (
+                  <>
+                    <ChevronRight className="w-3.5 h-3.5 text-[#d1c6ab] hidden md:inline" />
+                    <span className="font-mono text-[#2f5ea1] font-bold hidden md:inline">
+                      {projectCode}
+                    </span>
+                  </>
+                )}
+              </div>
             </div>
 
-            <div className="flex items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#d6e3ff] text-[#001b3d] text-xs font-bold">
-                <Sparkles className="w-3.5 h-3.5 text-[#2f5ea1]" />
-                Motor IA Pintuco v4.2 Activo
-              </span>
-              <span className="inline-flex items-center px-3 py-1 rounded-full bg-[#ebe2cf] text-[#4d4632] text-xs font-semibold">
-                Prioridad Alta
-              </span>
-            </div>
-          </div>
-
-          {/* Main Header Row with Title & CTAs */}
-          <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4 pt-1">
-            <div className="flex flex-col gap-1.5">
-              <div className="flex items-center gap-3">
-                <h1 className="text-2xl sm:text-3xl font-black text-[#1f1b10] tracking-tight">
-                  Evaluación Técnica & Cotización Inteligente
-                </h1>
-                <span className="hidden md:inline-block px-2.5 py-0.5 rounded bg-[#ffe07f] text-[#231b00] text-xs font-black tracking-wider uppercase">
-                  En Proceso
+            {/* Right: Quick Global Search, System Status & Actions */}
+            <div className="flex items-center gap-2 sm:gap-3">
+              <div className="hidden xl:flex items-center gap-1.5 px-3 py-1 bg-[#fcf3e0] rounded-full border border-[#ebe2cf]">
+                <span className="w-2 h-2 rounded-full bg-[#2f5ea1] animate-pulse"></span>
+                <span className="text-[11px] font-bold text-[#4d4632]">
+                  Motor IA v4.2 • SAP S/4HANA
                 </span>
               </div>
 
-              {/* Metadata Pill Bar */}
-              <div className="flex flex-wrap items-center gap-y-1 gap-x-4 text-[#4d4632] text-xs sm:text-sm">
-                <div className="flex items-center gap-1.5">
-                  <User className="w-4 h-4 text-[#2f5ea1]" />
-                  <span className="font-semibold text-[#1f1b10]">Cliente:</span>
-                  <span>{clientName}</span>
-                </div>
-                <span className="w-1 h-1 rounded-full bg-[#d1c6ab]"></span>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[#2f5ea1] font-bold">📍</span>
-                  <span>{clientAddress}</span>
-                </div>
-                <span className="w-1 h-1 rounded-full bg-[#d1c6ab]"></span>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[#2f5ea1] font-bold">📅</span>
-                  <span>12 Mayo 2024</span>
-                </div>
-                <span className="w-1 h-1 rounded-full bg-[#d1c6ab]"></span>
-                <div className="flex items-center gap-1.5">
-                  <Layers className="w-4 h-4 text-[#725c00]" />
-                  <span className="font-bold text-[#1f1b10]">Área Declarada: {projectArea} m²</span>
-                  <span className="text-[#7f765f] text-xs">(Interior Residencial)</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Action Buttons */}
-            <div className="flex flex-wrap items-center gap-2 sm:gap-3 shrink-0">
+              {/* Direct Status Control Button in Header */}
               <button
                 type="button"
-                onClick={() => triggerToast('Borrador guardado exitosamente en el servidor')}
-                className="px-4 py-2.5 rounded-xl bg-white text-[#1f1b10] hover:bg-[#f6eddb] transition-colors shadow-2xs text-xs sm:text-sm font-bold flex items-center gap-1.5 border border-[#ebe2cf] cursor-pointer"
+                onClick={() => setShowStatusModal(true)}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#ffd100] hover:bg-[#ffc800] text-[#0d4788] transition-all text-xs font-black shadow-2xs hover:shadow-xs border border-[#e5bc00] cursor-pointer"
+                title="Haz clic para cambiar el estado de este proyecto"
+                id="btn-header-change-status"
+              >
+                <SlidersHorizontal className="w-3.5 h-3.5 text-[#0d4788]" />
+                <span className="hidden sm:inline">Estado:</span>
+                <span className="underline decoration-dotted">{activeRequest?.status || 'Cotizada'}</span>
+                <ChevronDown className="w-3 h-3 text-[#0d4788]" />
+              </button>
+
+              {/* Action Buttons in Header */}
+              <button
+                type="button"
+                onClick={() => triggerToast('Borrador de expediente guardado en el servidor')}
+                className="hidden sm:flex px-3.5 py-2 rounded-xl bg-white text-[#1f1b10] hover:bg-[#f6eddb] transition-colors text-xs font-bold items-center gap-1.5 border border-[#ebe2cf] cursor-pointer"
                 id="btn-save-draft"
               >
                 <Save className="w-4 h-4 text-[#7f765f]" />
-                <span>Guardar Borrador</span>
+                <span>Guardar</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => setShowPdfModal(true)}
-                className="px-4 py-2.5 rounded-xl bg-[#f0e7d5] text-[#2f5ea1] hover:bg-[#ebe2cf] transition-colors text-xs sm:text-sm font-bold flex items-center gap-1.5 border border-[#d1c6ab]/40 cursor-pointer"
+                className="px-3.5 py-2 rounded-xl bg-[#f0e7d5] text-[#2f5ea1] hover:bg-[#ebe2cf] transition-colors text-xs font-bold flex items-center gap-1.5 border border-[#d1c6ab]/40 cursor-pointer"
                 id="btn-preview-pdf"
               >
                 <FileDown className="w-4 h-4" />
-                <span>Previsualizar PDF</span>
+                <span className="hidden sm:inline">PDF</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => setShowApproveModal(true)}
-                className="px-5 py-2.5 rounded-xl bg-[#ffd100] text-[#0d4788] hover:bg-[#ffc800] transition-all shadow-sm hover:shadow-md text-xs sm:text-sm font-black flex items-center gap-2 cursor-pointer"
+                className="px-4 py-2 rounded-xl bg-[#ffd100] text-[#0d4788] hover:bg-[#ffc800] transition-all shadow-xs text-xs font-black flex items-center gap-1.5 cursor-pointer"
                 id="btn-approve-send"
               >
                 <Send className="w-4 h-4" />
-                <span>Aprobar y Enviar</span>
+                <span>Aprobar</span>
               </button>
             </div>
           </div>
-        </div>
-      </section>
+        </header>
 
-      {/* ===================================================================
-          WORKSPACE GRID: 2-COLUMN SPLIT (45% vs 55%)
-          =================================================================== */}
-      <div className="w-full px-4 sm:px-6 lg:px-8 py-8">
-        <div className="max-w-[1400px] mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-          {/* ===============================================================
-              LEFT COLUMN: DIAGNÓSTICO DIGITAL POR IA (45% / Span 5)
-              =============================================================== */}
-          <div className="lg:col-span-5 flex flex-col gap-6">
-            {/* Card: Photographic Scan & Vision AI */}
-            <div className="bg-white rounded-2xl shadow-xs border border-[#ebe2cf] p-6 flex flex-col gap-4">
-              <div className="flex items-center justify-between flex-wrap gap-2">
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-xl bg-[#ffe07f] flex items-center justify-center text-[#231b00] font-bold">
-                    <ScanLine className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h2 className="text-lg font-black text-[#1f1b10] leading-tight">
-                      Escaneo Digital de Sustrato
-                    </h2>
-                    <p className="text-xs text-[#7f765f]">
-                      Visión artificial calibrada sobre muro de sala y comedor
-                    </p>
-                  </div>
-                </div>
-                <span className="px-3 py-1 rounded-full bg-[#d6e3ff] text-[#001b3d] text-xs font-black">
-                  IA Confianza: 98.4%
-                </span>
-              </div>
+        {/* Dynamic Body Content according to active sidebar tab */}
+        <main className="flex-1 p-4 sm:p-6 lg:p-8">
+          <div className="max-w-[1400px] mx-auto">
+            {/* VIEW 1: DIAGNÓSTICO & EVALUACIÓN IA */}
+            {activeAdvisorNav === 'diagnostico' && (
+              <div className="space-y-6">
+                {/* Active Project Breadcrumb Summary Strip with Status Management */}
+                {(() => {
+                  const statusInfo = getStatusDetails(activeRequest?.status || 'Cotizada');
+                  const StatusIcon = statusInfo.icon;
 
-              {/* Interactive Photographic Overlay Container */}
-              <div className="relative w-full rounded-xl overflow-hidden bg-[#1f1b10] aspect-[4/3] group shadow-inner">
-                <img
-                  src="https://lh3.googleusercontent.com/aida-public/AB6AXuB0NI0657yWS_vLxwCNyXu-WRx786-wyS41v-znOJAeyE8I7_QyGJGIoty2iMmo8Xbn5LVvX-ezlfzkJmPsckEwn3arbF9VxlsRJyGoFS0JTDJFdk9iRUnah70abm64q9UaPC-hkI3rbNIVpoCNuxrnCAml9xVdXj2lixNjkVzID6n97oxJN42M0zLwboPrzSMTGWCJBQZAWDE0GTwHOD5eaa7il_izE1nkUOa2UUuyAA-AJR0Hz6h-Pw"
-                  alt="Living room scan"
-                  className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                />
+                  const milestoneSteps = [
+                    { step: 1, label: '1. Solicitud', keyStatus: 'Registrada' },
+                    { step: 2, label: '2. Diagnóstico IA', keyStatus: 'Analizada por IA' },
+                    { step: 3, label: '3. Cotizada', keyStatus: 'Cotizada' },
+                    { step: 4, label: '4. Asignada / Fab', keyStatus: 'Inventario Asignado' },
+                    { step: 5, label: '5. Entrega', keyStatus: 'Completada' },
+                  ];
 
-                {/* Overlay gradient */}
-                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/30 pointer-events-none"></div>
+                  return (
+                    <div className="bg-[#fcf3e0] rounded-2xl p-5 border border-[#ebe2cf] space-y-4 shadow-xs">
+                      {/* Top Row: Title, Metadata, Current Status Badge & Change Button */}
+                      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                        <div className="space-y-1.5">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-mono text-xs font-bold bg-[#f0e7d5] px-2.5 py-0.5 rounded border border-[#d1c6ab]/50">
+                              {projectCode}
+                            </span>
 
-                {/* Bounding Box 1: Focal Wall */}
-                <div className="absolute top-[18%] left-[22%] w-[48%] h-[56%] border-2 border-dashed border-[#ffd100] rounded-xl pointer-events-none flex flex-col justify-between p-2 bg-[#ffd100]/10 backdrop-blur-[1px]">
-                  <div className="self-start px-2 py-0.5 rounded bg-[#ffd100] text-[#0d4788] text-[10px] font-black uppercase tracking-wider flex items-center gap-1 shadow-xs">
-                    <span className="w-1.5 h-1.5 rounded-full bg-[#c00014] animate-ping"></span>
-                    <span>Muro Principal A-1</span>
-                  </div>
-                  <div className="self-end px-2 py-0.5 rounded bg-black/80 text-white text-[10px] font-bold">
-                    Área: 26.4 m²
-                  </div>
-                </div>
+                            {/* Current Status Pill with click to change */}
+                            <div
+                              onClick={() => setShowStatusModal(true)}
+                              className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black border cursor-pointer hover:shadow-xs transition-all ${statusInfo.badgeBg}`}
+                              title="Haz clic para cambiar el estado"
+                            >
+                              <StatusIcon className="w-3.5 h-3.5 shrink-0" />
+                              <span>{activeRequest?.status || 'Cotizada'}</span>
+                              <span className="text-[10px] opacity-75 font-semibold">
+                                • {statusInfo.phaseLabel}
+                              </span>
+                            </div>
+                          </div>
 
-                {/* Bounding Box 2: Lateral Perimeter */}
-                <div className="absolute top-[28%] right-[4%] w-[24%] h-[54%] border-2 border-dotted border-[#2f5ea1] rounded-xl pointer-events-none flex flex-col justify-between p-2 bg-[#2f5ea1]/10">
-                  <div className="self-start px-2 py-0.5 rounded bg-[#2f5ea1] text-white text-[10px] font-bold uppercase">
-                    Perímetro B
-                  </div>
-                  <div className="self-end px-2 py-0.5 rounded bg-black/80 text-white text-[10px] font-bold">
-                    Área: 18.6 m²
-                  </div>
-                </div>
+                          <h1 className="text-xl sm:text-2xl font-black text-[#1f1b10] leading-tight">
+                            Evaluación Técnica de Sustrato & Prescripción
+                          </h1>
 
-                {/* AI HUD Live Sensor Floating Pill */}
-                <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between gap-2 p-3 rounded-xl bg-white/95 backdrop-blur-md text-[#1f1b10] shadow-md border border-white/40">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-3 h-3 rounded-full bg-[#2f5ea1] animate-pulse"></div>
-                    <div className="flex flex-col">
-                      <span className="text-[10px] text-[#7f765f] leading-tight font-medium">
-                        Superficie Total Estimada
-                      </span>
-                      <span className="text-xs font-bold text-[#1f1b10]">
-                        45.00 m² (Precisión ±0.2%)
-                      </span>
+                          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[#4d4632]">
+                            <span className="flex items-center gap-1">
+                              <User className="w-3.5 h-3.5 text-[#2f5ea1]" />
+                              <strong>Cliente:</strong> {clientName}
+                            </span>
+                            <span>•</span>
+                            <span>📍 {clientAddress}</span>
+                            <span>•</span>
+                            <span><strong>Área:</strong> {projectArea} m²</span>
+                            {activeRequest?.technicalReviewNotes && (
+                              <>
+                                <span>•</span>
+                                <span className="text-[#725c00] italic">
+                                  Nota: "{activeRequest.technicalReviewNotes.slice(0, 45)}..."
+                                </span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Status Change CTA Buttons */}
+                        <div className="flex flex-wrap items-center gap-2 self-start lg:self-auto">
+                          <button
+                            type="button"
+                            onClick={() => setShowStatusModal(true)}
+                            className="px-4 py-2.5 rounded-xl bg-[#0d4788] hover:bg-[#093566] text-white text-xs font-black shadow-xs hover:shadow-sm transition-all flex items-center gap-2 cursor-pointer"
+                            id="btn-banner-change-status"
+                            title="Abrir panel para cambiar la etapa o estado del proyecto"
+                          >
+                            <SlidersHorizontal className="w-4 h-4 text-[#ffd100]" />
+                            <span>Cambiar Estado del Proyecto</span>
+                            <ChevronRight className="w-3.5 h-3.5 text-white/80" />
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setActiveAdvisorNav('solicitudes')}
+                            className="px-3.5 py-2.5 rounded-xl bg-white border border-[#ebe2cf] text-xs font-bold text-[#4d4632] hover:bg-[#f6eddb] transition-colors flex items-center gap-1.5 cursor-pointer"
+                          >
+                            <Layers className="w-4 h-4 text-[#725c00]" />
+                            <span>Ver Otros Radicados</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Interactive Visual Stepper: 5 Milestone Phases */}
+                      <div className="pt-3 border-t border-[#ebe2cf]/80 space-y-2">
+                        <div className="flex items-center justify-between text-[11px] font-bold text-[#7f765f]">
+                          <span>Flujo Operativo del Proyecto:</span>
+                          <span className="text-[#0d4788] font-black">
+                            {statusInfo.phaseLabel} ({statusInfo.percent}% de avance)
+                          </span>
+                        </div>
+
+                        {/* Progress Bar Track */}
+                        <div className="w-full bg-[#ebe2cf] h-2 rounded-full overflow-hidden">
+                          <div
+                            className="bg-[#2f5ea1] h-full rounded-full transition-all duration-500"
+                            style={{ width: `${statusInfo.percent}%` }}
+                          />
+                        </div>
+
+                        {/* 5 Milestone Step Pills */}
+                        <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5 pt-1">
+                          {milestoneSteps.map((m) => {
+                            const isPassed = statusInfo.stepNumber >= m.step;
+                            const isCurrent = statusInfo.stepNumber === m.step;
+
+                            return (
+                              <button
+                                key={m.step}
+                                type="button"
+                                onClick={() => setShowStatusModal(true)}
+                                className={`px-2 py-1.5 rounded-xl text-[11px] font-bold flex items-center justify-center gap-1.5 transition-all text-center cursor-pointer border ${
+                                  isCurrent
+                                    ? 'bg-[#ffd100] text-[#0d4788] border-[#e5bc00] shadow-xs'
+                                    : isPassed
+                                    ? 'bg-white text-[#137333] border-[#86efac]'
+                                    : 'bg-[#f6eddb]/60 text-[#7f765f] border-transparent hover:bg-white'
+                                }`}
+                                title={`Haz clic para cambiar a etapa ${m.label}`}
+                              >
+                                {isPassed ? (
+                                  <Check className="w-3 h-3 text-[#137333] shrink-0 stroke-[3]" />
+                                ) : (
+                                  <span className="w-1.5 h-1.5 rounded-full bg-[#d1c6ab] shrink-0" />
+                                )}
+                                <span className="truncate">{m.label}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                  <div className="h-6 w-px bg-[#d1c6ab]"></div>
-                  <div className="flex flex-col text-right">
-                    <span className="text-[10px] text-[#7f765f] leading-tight font-medium">
-                      Higrometría
-                    </span>
-                    <span className="text-xs font-bold text-[#2f5ea1]">4.2% Humedad</span>
-                  </div>
-                </div>
-              </div>
+                  );
+                })()}
 
-              {/* Micro AI Diagnostics Readings */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-                {/* Metric 1: Porosidad */}
-                <div className="p-3.5 rounded-xl bg-[#f6eddb] border border-[#ebe2cf] flex flex-col gap-1.5">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-[#7f765f] font-semibold">Porosidad Muro</span>
-                    <GripHorizontal className="w-4 h-4 text-[#725c00]" />
-                  </div>
-                  <div className="flex items-baseline gap-1.5">
-                    <span className="text-xl font-black text-[#1f1b10]">38%</span>
-                    <span className="text-xs text-[#4d4632] font-semibold">Media-Alta</span>
-                  </div>
-                  <div className="w-full bg-[#f0e7d5] h-2 rounded-full overflow-hidden">
-                    <div className="bg-[#725c00] h-full rounded-full" style={{ width: '38%' }}></div>
-                  </div>
-                  <span className="text-[11px] text-[#4d4632]">Requiere sellado previo uniforme</span>
-                </div>
-
-                {/* Metric 2: Condición del Sustrato */}
-                <div className="p-3.5 rounded-xl bg-[#f6eddb] border border-[#ebe2cf] flex flex-col gap-1.5">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-[#7f765f] font-semibold">Nivel Humedad</span>
-                    <Droplets className="w-4 h-4 text-[#2f5ea1]" />
-                  </div>
-                  <div className="flex items-baseline gap-1.5">
-                    <span className="text-xl font-black text-[#2f5ea1]">4.2%</span>
-                    <span className="text-xs text-[#7f765f] font-medium">Óptimo (&lt;6%)</span>
-                  </div>
-                  <div className="w-full bg-[#f0e7d5] h-2 rounded-full overflow-hidden">
-                    <div className="bg-[#2f5ea1] h-full rounded-full" style={{ width: '42%' }}></div>
-                  </div>
-                  <span className="text-[11px] text-[#2f5ea1] font-bold">
-                    Apto para aplicación inmediata
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {/* Card: Patologías y Hallazgos (Asesor Validation) */}
-            <div className="bg-white rounded-2xl shadow-xs border border-[#ebe2cf] p-6 flex flex-col gap-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-xl bg-[#f0e7d5] flex items-center justify-center text-[#1f1b10] font-bold">
-                    <CheckSquare className="w-5 h-5 text-[#2f5ea1]" />
-                  </div>
-                  <div>
-                    <h3 className="text-sm sm:text-base font-bold text-[#1f1b10]">
-                      Validación de Patologías del Sustrato
-                    </h3>
-                    <p className="text-xs text-[#7f765f]">
-                      El asesor valida y confirma las alertas generadas por IA
-                    </p>
-                  </div>
-                </div>
-                <span className="text-xs text-[#7f765f] font-medium">3 verificados</span>
-              </div>
-
-              <div className="flex flex-col gap-2.5">
-                {/* Item 1 */}
-                <label className="flex items-start gap-3 p-3.5 rounded-xl bg-[#fcf3e0] border border-[#ebe2cf] hover:bg-[#f6eddb] transition-colors cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={pathologies.sellador}
-                    onChange={(e) =>
-                      setPathologies((prev) => ({ ...prev, sellador: e.target.checked }))
-                    }
-                    className="mt-1 w-4 h-4 accent-[#725c00] rounded cursor-pointer"
-                  />
-                  <div className="flex flex-col">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs sm:text-sm font-bold text-[#1f1b10]">
-                        Sellador Antihumedad 501 Requerido
-                      </span>
-                      <span className="px-2 py-0.5 rounded bg-[#ffe07f] text-[#231b00] text-[10px] font-black">
-                        Bloqueo Alcalino
-                      </span>
-                    </div>
-                    <span className="text-xs text-[#4d4632] mt-0.5">
-                      Estuco tradicional con alcalinidad latente. Se recomienda 1 mano para
-                      garantizar anclaje.
-                    </span>
-                  </div>
-                </label>
-
-                {/* Item 2 */}
-                <label className="flex items-start gap-3 p-3.5 rounded-xl bg-[#fcf3e0] border border-[#ebe2cf] hover:bg-[#f6eddb] transition-colors cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={pathologies.microfisuras}
-                    onChange={(e) =>
-                      setPathologies((prev) => ({ ...prev, microfisuras: e.target.checked }))
-                    }
-                    className="mt-1 w-4 h-4 accent-[#725c00] rounded cursor-pointer"
-                  />
-                  <div className="flex flex-col">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs sm:text-sm font-bold text-[#1f1b10]">
-                        Microfisuras no estructurales (&lt; 0.5mm)
-                      </span>
-                      <span className="px-2 py-0.5 rounded bg-[#d6e3ff] text-[#001b3d] text-[10px] font-black">
-                        Resane Menor
-                      </span>
-                    </div>
-                    <span className="text-xs text-[#4d4632] mt-0.5">
-                      Detección en esquinas de vano de ventana. Incorporar 1 kg de Masilla Acrílica.
-                    </span>
-                  </div>
-                </label>
-
-                {/* Item 3 */}
-                <label className="flex items-start gap-3 p-3.5 rounded-xl bg-[#fcf3e0] border border-[#ebe2cf] opacity-75 hover:opacity-100 transition-opacity cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={pathologies.grasa}
-                    onChange={(e) =>
-                      setPathologies((prev) => ({ ...prev, grasa: e.target.checked }))
-                    }
-                    className="mt-1 w-4 h-4 accent-[#725c00] rounded cursor-pointer"
-                  />
-                  <div className="flex flex-col">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs sm:text-sm font-medium text-[#1f1b10]">
-                        Presencia de grasa o contaminantes grasos
-                      </span>
-                      <span className="px-2 py-0.5 rounded bg-[#f6eddb] text-[#7f765f] text-[10px]">
-                        No Detectado
-                      </span>
-                    </div>
-                    <span className="text-xs text-[#7f765f] mt-0.5">
-                      Muro limpio. No requiere lavado especial ni desengrasante previo.
-                    </span>
-                  </div>
-                </label>
-              </div>
-            </div>
-
-            {/* Card: Prescripción de Pintura & Paleta Seleccionada */}
-            <div className="bg-white rounded-2xl shadow-xs border border-[#ebe2cf] p-6 flex flex-col gap-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-xl bg-[#d6e3ff] flex items-center justify-center text-[#001b3d]">
-                    <Palette className="w-5 h-5 text-[#2f5ea1]" />
-                  </div>
-                  <div>
-                    <h3 className="text-sm sm:text-base font-bold text-[#1f1b10]">
-                      Sistema de Pintura Pintuco
-                    </h3>
-                    <p className="text-xs text-[#7f765f]">
-                      Línea de máxima lavabilidad y confort ambiental
-                    </p>
-                  </div>
-                </div>
-                <span className="text-xs text-[#2f5ea1] font-bold">Línea Premium</span>
-              </div>
-
-              <div className="flex flex-col gap-3">
-                <div className="flex flex-col gap-1">
-                  <label className="text-[11px] text-[#7f765f] uppercase font-bold tracking-wider">
-                    Producto Base Prescrito
-                  </label>
-                  <div className="p-3.5 rounded-xl bg-[#f6eddb] border border-[#ebe2cf] flex items-center justify-between">
-                    <div className="flex flex-col">
-                      <span className="text-sm font-bold text-[#1f1b10]">
-                        Viniltex Avanzado Antibacterial
-                      </span>
-                      <span className="text-xs text-[#4d4632]">
-                        Base Agua • Acabado Satinado • Máxima Lavabilidad
-                      </span>
-                    </div>
-                    <ShieldCheck className="w-5 h-5 text-[#2f5ea1]" />
-                  </div>
-                </div>
-
-                {/* Color Swatches Prescribed */}
-                <div className="flex flex-col gap-1">
-                  <label className="text-[11px] text-[#7f765f] uppercase font-bold tracking-wider">
-                    Carta de Color Asignada
-                  </label>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {/* Color 1 */}
-                    <div className="p-3.5 rounded-xl bg-[#fcf3e0] border border-[#ebe2cf] flex items-center gap-3">
-                      <div
-                        className="w-10 h-10 rounded-xl shadow-xs shrink-0 border border-black/10"
-                        style={{ backgroundColor: '#df8c72' }}
-                      ></div>
-                      <div className="flex flex-col min-w-0">
-                        <span className="text-xs sm:text-sm font-bold text-[#1f1b10] truncate">
-                          Salmón Terracota
+                {/* Workspace 2-Column Grid */}
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+                  {/* LEFT COLUMN: VISIÓN DE SUSTRATO & PATOLOGÍAS (Span 5) */}
+                  <div className="lg:col-span-5 flex flex-col gap-6">
+                    {/* Card: Photographic Scan & Vision AI */}
+                    <div className="bg-white rounded-2xl shadow-xs border border-[#ebe2cf] p-5 sm:p-6 flex flex-col gap-4">
+                      <div className="flex items-center justify-between flex-wrap gap-2">
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-xl bg-[#ffe07f] flex items-center justify-center text-[#231b00] font-bold">
+                            <ScanLine className="w-5 h-5" />
+                          </div>
+                          <div>
+                            <h2 className="text-base sm:text-lg font-black text-[#1f1b10] leading-tight">
+                              Escaneo Digital de Sustrato
+                            </h2>
+                            <p className="text-xs text-[#7f765f]">
+                              Visión artificial calibrada sobre muro analizado
+                            </p>
+                          </div>
+                        </div>
+                        <span className="px-2.5 py-1 rounded-full bg-[#d6e3ff] text-[#001b3d] text-xs font-black">
+                          IA Confianza: 98.4%
                         </span>
-                        <span className="text-[11px] text-[#7f765f] font-mono">
-                          Cód. 248-A (Muro Acentuado)
-                        </span>
+                      </div>
+
+                      {/* Interactive Photographic Overlay Container */}
+                      <div className="relative w-full rounded-xl overflow-hidden bg-[#1f1b10] aspect-[4/3] group shadow-inner">
+                        <img
+                          src={
+                            activeRequest?.photoUrl ||
+                            'https://lh3.googleusercontent.com/aida-public/AB6AXuB0NI0657yWS_vLxwCNyXu-WRx786-wyS41v-znOJAeyE8I7_QyGJGIoty2iMmo8Xbn5LVvX-ezlfzkJmPsckEwn3arbF9VxlsRJyGoFS0JTDJFdk9iRUnah70abm64q9UaPC-hkI3rbNIVpoCNuxrnCAml9xVdXj2lixNjkVzID6n97oxJN42M0zLwboPrzSMTGWCJBQZAWDE0GTwHOD5eaa7il_izE1nkUOa2UUuyAA-AJR0Hz6h-Pw'
+                          }
+                          alt="Surface scan"
+                          className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                        />
+
+                        {/* Overlay gradient */}
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/30 pointer-events-none"></div>
+
+                        {/* Bounding Box 1 */}
+                        <div className="absolute top-[18%] left-[22%] w-[48%] h-[56%] border-2 border-dashed border-[#ffd100] rounded-xl pointer-events-none flex flex-col justify-between p-2 bg-[#ffd100]/10 backdrop-blur-[1px]">
+                          <div className="self-start px-2 py-0.5 rounded bg-[#ffd100] text-[#0d4788] text-[10px] font-black uppercase tracking-wider flex items-center gap-1 shadow-xs">
+                            <span className="w-1.5 h-1.5 rounded-full bg-[#c00014] animate-ping"></span>
+                            <span>Muro Principal A-1</span>
+                          </div>
+                          <div className="self-end px-2 py-0.5 rounded bg-black/80 text-white text-[10px] font-bold">
+                            Área: {Math.round(projectArea * 0.58)} m²
+                          </div>
+                        </div>
+
+                        {/* Bounding Box 2 */}
+                        <div className="absolute top-[28%] right-[4%] w-[24%] h-[54%] border-2 border-dotted border-[#2f5ea1] rounded-xl pointer-events-none flex flex-col justify-between p-2 bg-[#2f5ea1]/10">
+                          <div className="self-start px-2 py-0.5 rounded bg-[#2f5ea1] text-white text-[10px] font-bold uppercase">
+                            Perímetro B
+                          </div>
+                          <div className="self-end px-2 py-0.5 rounded bg-black/80 text-white text-[10px] font-bold">
+                            Área: {Math.round(projectArea * 0.42)} m²
+                          </div>
+                        </div>
+
+                        {/* AI HUD Sensor Reading */}
+                        <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between gap-2 p-2.5 rounded-xl bg-white/95 backdrop-blur-md text-[#1f1b10] shadow-md border border-white/40">
+                          <div className="flex items-center gap-2">
+                            <div className="w-2.5 h-2.5 rounded-full bg-[#2f5ea1] animate-pulse"></div>
+                            <div className="flex flex-col">
+                              <span className="text-[10px] text-[#7f765f] leading-tight">
+                                Superficie Total
+                              </span>
+                              <span className="text-xs font-bold text-[#1f1b10]">
+                                {projectArea}.00 m² (±0.2%)
+                              </span>
+                            </div>
+                          </div>
+                          <div className="h-6 w-px bg-[#d1c6ab]"></div>
+                          <div className="flex flex-col text-right">
+                            <span className="text-[10px] text-[#7f765f] leading-tight">
+                              Higrometría
+                            </span>
+                            <span className="text-xs font-bold text-[#2f5ea1]">4.2% Humedad</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Micro Sensors Reading */}
+                      <div className="grid grid-cols-2 gap-3 pt-1">
+                        <div className="p-3 rounded-xl bg-[#f6eddb] border border-[#ebe2cf] flex flex-col gap-1">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs text-[#7f765f] font-semibold">Porosidad Muro</span>
+                            <GripHorizontal className="w-4 h-4 text-[#725c00]" />
+                          </div>
+                          <div className="flex items-baseline gap-1.5">
+                            <span className="text-lg font-black text-[#1f1b10]">38%</span>
+                            <span className="text-xs text-[#4d4632]">Media-Alta</span>
+                          </div>
+                          <span className="text-[10px] text-[#4d4632]">Requiere sellado previo</span>
+                        </div>
+
+                        <div className="p-3 rounded-xl bg-[#f6eddb] border border-[#ebe2cf] flex flex-col gap-1">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs text-[#7f765f] font-semibold">Nivel Humedad</span>
+                            <Droplets className="w-4 h-4 text-[#2f5ea1]" />
+                          </div>
+                          <div className="flex items-baseline gap-1.5">
+                            <span className="text-lg font-black text-[#2f5ea1]">4.2%</span>
+                            <span className="text-xs text-[#7f765f]">Óptimo (&lt;6%)</span>
+                          </div>
+                          <span className="text-[10px] text-[#2f5ea1] font-bold">Apto para pintar</span>
+                        </div>
                       </div>
                     </div>
 
-                    {/* Color 2 */}
-                    <div className="p-3.5 rounded-xl bg-[#fcf3e0] border border-[#ebe2cf] flex items-center gap-3">
-                      <div
-                        className="w-10 h-10 rounded-xl shadow-xs shrink-0 border border-black/15"
-                        style={{ backgroundColor: '#f7f5ed' }}
-                      ></div>
-                      <div className="flex flex-col min-w-0">
-                        <span className="text-xs sm:text-sm font-bold text-[#1f1b10] truncate">
-                          Blanco Lienzo
-                        </span>
-                        <span className="text-[11px] text-[#7f765f] font-mono">
-                          Cód. 100-B (Perímetro)
-                        </span>
+                    {/* Card: Patologías y Hallazgos */}
+                    <div className="bg-white rounded-2xl shadow-xs border border-[#ebe2cf] p-5 sm:p-6 flex flex-col gap-4">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-xl bg-[#f0e7d5] flex items-center justify-center text-[#1f1b10] font-bold">
+                            <CheckSquare className="w-5 h-5 text-[#2f5ea1]" />
+                          </div>
+                          <div>
+                            <h3 className="text-sm sm:text-base font-bold text-[#1f1b10]">
+                              Validación de Patologías
+                            </h3>
+                            <p className="text-xs text-[#7f765f]">
+                              Confirma las alertas detectadas para la prescripción
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="flex items-start gap-3 p-3 rounded-xl bg-[#fcf3e0] border border-[#ebe2cf] hover:bg-[#f6eddb] transition-colors cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={pathologies.sellador}
+                            onChange={(e) =>
+                              setPathologies((prev) => ({ ...prev, sellador: e.target.checked }))
+                            }
+                            className="mt-1 w-4 h-4 accent-[#725c00] rounded cursor-pointer"
+                          />
+                          <div className="flex flex-col">
+                            <span className="text-xs font-bold text-[#1f1b10]">
+                              Sellador Antihumedad 501 Requerido
+                            </span>
+                            <span className="text-[11px] text-[#4d4632]">
+                              Estuco con alcalinidad residual. Se prescribe 1 mano fijadora.
+                            </span>
+                          </div>
+                        </label>
+
+                        <label className="flex items-start gap-3 p-3 rounded-xl bg-[#fcf3e0] border border-[#ebe2cf] hover:bg-[#f6eddb] transition-colors cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={pathologies.microfisuras}
+                            onChange={(e) =>
+                              setPathologies((prev) => ({ ...prev, microfisuras: e.target.checked }))
+                            }
+                            className="mt-1 w-4 h-4 accent-[#725c00] rounded cursor-pointer"
+                          />
+                          <div className="flex flex-col">
+                            <span className="text-xs font-bold text-[#1f1b10]">
+                              Microfisuras no estructurales (&lt; 0.5mm)
+                            </span>
+                            <span className="text-[11px] text-[#4d4632]">
+                              Requiere puenteo con Masilla Acrílica Pintuco.
+                            </span>
+                          </div>
+                        </label>
+
+                        <label className="flex items-start gap-3 p-3 rounded-xl bg-[#fcf3e0] border border-[#ebe2cf] hover:bg-[#f6eddb] transition-colors cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={pathologies.grasa}
+                            onChange={(e) =>
+                              setPathologies((prev) => ({ ...prev, grasa: e.target.checked }))
+                            }
+                            className="mt-1 w-4 h-4 accent-[#725c00] rounded cursor-pointer"
+                          />
+                          <div className="flex flex-col">
+                            <span className="text-xs font-bold text-[#1f1b10]">
+                              Grasa o contaminantes superficiales
+                            </span>
+                            <span className="text-[11px] text-[#4d4632]">
+                              Aplicar desengrasante cítrico antes de imprimar.
+                            </span>
+                          </div>
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* RIGHT COLUMN: PROPUESTA COMERCIAL & DOSIFICACIÓN (Span 7) */}
+                  <div className="lg:col-span-7 flex flex-col gap-6">
+                    {/* Card: Calculadora Técnica y Merma */}
+                    <div className="bg-white rounded-2xl shadow-xs border border-[#ebe2cf] p-5 sm:p-6 flex flex-col gap-4">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-xl bg-[#ffd100] flex items-center justify-center text-[#0d4788] font-bold">
+                            <Calculator className="w-5 h-5" />
+                          </div>
+                          <div>
+                            <h2 className="text-base sm:text-lg font-black text-[#1f1b10]">
+                              Calculadora Técnica Asistida
+                            </h2>
+                            <p className="text-xs text-[#7f765f]">
+                              Rendimiento volumétrico calibrado según rugosidad
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-1.5 bg-[#f6eddb] px-3 py-1 rounded-lg border border-[#d1c6ab]/40">
+                          <span className="text-xs text-[#7f765f]">Merma:</span>
+                          <span className="text-xs text-[#1f1b10] font-black">+{mermaPercent}%</span>
+                        </div>
+                      </div>
+
+                      {/* Merma Slider Bar */}
+                      <div className="p-3.5 rounded-xl bg-[#fcf3e0] border border-[#ebe2cf] flex flex-col sm:flex-row items-center justify-between gap-3">
+                        <div className="flex items-center gap-2.5 w-full sm:w-auto">
+                          <Sliders className="w-4 h-4 text-[#2f5ea1]" />
+                          <span className="text-xs font-bold text-[#1f1b10]">
+                            Calibración de Merma de Aplicación:
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-3 w-full sm:w-60">
+                          <input
+                            type="range"
+                            min="2"
+                            max="20"
+                            value={mermaPercent}
+                            onChange={(e) => setMermaPercent(Number(e.target.value))}
+                            className="w-full accent-[#725c00] cursor-pointer"
+                          />
+                          <span className="text-xs font-black text-[#1f1b10] w-10 text-right">
+                            {mermaPercent}%
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Card: Tabla de Cotización Interactiva */}
+                    <div className="bg-white rounded-2xl shadow-xs border border-[#ebe2cf] p-5 sm:p-6 flex flex-col gap-4">
+                      <div className="flex items-center justify-between flex-wrap gap-2">
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-xl bg-[#f0e7d5] flex items-center justify-center text-[#1f1b10]">
+                            <Receipt className="w-5 h-5 text-[#2f5ea1]" />
+                          </div>
+                          <div>
+                            <h2 className="text-base sm:text-lg font-black text-[#1f1b10]">
+                              Propuesta Técnico-Comercial Oficial
+                            </h2>
+                            <p className="text-xs text-[#7f765f]">
+                              Valores oficiales Pintuco con IVA y descuento asesor
+                            </p>
+                          </div>
+                        </div>
+
+                        {lockInfo.canAddProducts ? (
+                          <button
+                            type="button"
+                            onClick={() => setActiveAdvisorNav('catalogo')}
+                            className="px-3 py-1.5 rounded-xl bg-[#ffd100] text-[#0d4788] text-xs font-black hover:bg-[#ffc800] transition-colors flex items-center gap-1 shadow-2xs cursor-pointer"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            <span>Agregar Producto</span>
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled
+                            className="px-3 py-1.5 rounded-xl bg-[#ebe2cf] text-[#7f765f] text-xs font-bold flex items-center gap-1.5 border border-[#d1c6ab]/70 cursor-not-allowed opacity-80"
+                            title={lockInfo.reason}
+                          >
+                            <Lock className="w-3.5 h-3.5 text-[#7f765f]" />
+                            <span>Agregar Producto (Bloqueado)</span>
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Locked Phase Alert Banner for Advisors */}
+                      {!lockInfo.canAddProducts && (
+                        <div className="p-3.5 rounded-xl bg-[#fcf3e0] border border-[#d1c6ab] flex items-start gap-3 text-xs text-[#4d4632]">
+                          <Lock className="w-4 h-4 text-[#725c00] shrink-0 mt-0.5" />
+                          <div>
+                            <strong className="text-[#1f1b10] block font-bold">
+                              Formulación técnica bloqueada ({lockInfo.badgeLabel}):
+                            </strong>
+                            <span>{lockInfo.reason}</span>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Items Table */}
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left text-xs text-[#1f1b10]">
+                          <thead>
+                            <tr className="bg-[#f0e7d5] text-[#1f1b10] text-[11px] uppercase tracking-wider font-bold">
+                              <th className="py-2.5 px-3 rounded-l-lg">Producto / Referencia</th>
+                              <th className="py-2.5 px-2">Presentación</th>
+                              <th className="py-2.5 px-2 text-center">Cantidad</th>
+                              <th className="py-2.5 px-3 text-right">Unitario</th>
+                              <th className="py-2.5 px-3 text-right">Total</th>
+                              <th className="py-2.5 px-2 text-center rounded-r-lg">Acción</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-[#ebe2cf]/50">
+                            {quoteItems.map((item, idx) => (
+                              <tr key={`${item.sku}-${idx}`} className="hover:bg-[#f6eddb]/40 transition-colors">
+                                <td className="py-2.5 px-3">
+                                  <div className="flex items-center gap-2">
+                                    {item.selectedColorHex && (
+                                      <span
+                                        className="w-3.5 h-3.5 rounded-md border border-black/20 shrink-0"
+                                        style={{ backgroundColor: item.selectedColorHex }}
+                                      />
+                                    )}
+                                    <div className="flex flex-col">
+                                      <span className="font-bold text-[#1f1b10]">{item.name}</span>
+                                      <span className="text-[10px] text-[#7f765f] font-mono">
+                                        SKU: {item.sku}
+                                      </span>
+                                    </div>
+                                  </div>
+                                </td>
+                                <td className="py-2.5 px-2 text-[#4d4632]">{item.unit}</td>
+                                <td className="py-2.5 px-2 text-center">
+                                  <div className="inline-flex items-center gap-1 bg-[#fcf3e0] px-2 py-0.5 rounded-lg border border-[#ebe2cf]">
+                                    <button
+                                      type="button"
+                                      disabled={!lockInfo.canEditQuantities}
+                                      onClick={() => handleUpdateItemQty(idx, -1)}
+                                      className={`w-5 h-5 rounded flex items-center justify-center transition-colors ${
+                                        lockInfo.canEditQuantities
+                                          ? 'text-[#7f765f] hover:text-[#1f1b10] hover:bg-[#ebe2cf] cursor-pointer'
+                                          : 'text-[#a89f8b] cursor-not-allowed opacity-40'
+                                      }`}
+                                      title={lockInfo.canEditQuantities ? 'Reducir' : lockInfo.shortWarning}
+                                    >
+                                      <Minus className="w-3 h-3" />
+                                    </button>
+                                    <span className="font-bold text-xs min-w-[18px]">{item.quantity}</span>
+                                    <button
+                                      type="button"
+                                      disabled={!lockInfo.canEditQuantities}
+                                      onClick={() => handleUpdateItemQty(idx, 1)}
+                                      className={`w-5 h-5 rounded flex items-center justify-center transition-colors ${
+                                        lockInfo.canEditQuantities
+                                          ? 'text-[#7f765f] hover:text-[#1f1b10] hover:bg-[#ebe2cf] cursor-pointer'
+                                          : 'text-[#a89f8b] cursor-not-allowed opacity-40'
+                                      }`}
+                                      title={lockInfo.canEditQuantities ? 'Aumentar' : lockInfo.shortWarning}
+                                    >
+                                      <Plus className="w-3 h-3" />
+                                    </button>
+                                  </div>
+                                </td>
+                                <td className="py-2.5 px-3 text-right font-mono text-[#4d4632]">
+                                  {formatCOP(item.unitPriceCOP)}
+                                </td>
+                                <td className="py-2.5 px-3 text-right font-mono font-bold text-[#1f1b10]">
+                                  {formatCOP(item.totalCOP)}
+                                </td>
+                                <td className="py-2.5 px-2 text-center">
+                                  {lockInfo.canRemoveProducts ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeleteItem(idx)}
+                                      className="p-1 rounded text-[#ba1a1a] hover:bg-[#ffdad6] transition-colors cursor-pointer"
+                                      title="Quitar producto"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  ) : (
+                                    <span
+                                      className="p-1 text-[#a89f8b] inline-flex items-center justify-center cursor-not-allowed opacity-40"
+                                      title={`Bloqueado en fase ${activeRequest?.status}`}
+                                    >
+                                      <Lock className="w-3.5 h-3.5" />
+                                    </span>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      {/* Totals Ledger */}
+                      <div className="bg-[#fcf3e0] p-4 rounded-xl border border-[#ebe2cf] flex flex-col gap-2 ml-auto w-full sm:w-80">
+                        <div className="flex justify-between items-center text-xs text-[#4d4632]">
+                          <span>Subtotal Productos:</span>
+                          <span className="font-mono text-[#1f1b10] font-bold">
+                            {formatCOP(subtotal)}
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-center text-xs text-[#ba1a1a] font-medium">
+                          <span>Descuento Asesor (-10%):</span>
+                          <span className="font-mono">-{formatCOP(discountAmount)}</span>
+                        </div>
+                        <div className="flex justify-between items-center text-xs text-[#4d4632]">
+                          <span>IVA (19%):</span>
+                          <span className="font-mono text-[#1f1b10] font-bold">
+                            {formatCOP(ivaAmount)}
+                          </span>
+                        </div>
+                        <div className="h-px bg-[#d1c6ab] my-0.5"></div>
+                        <div className="flex justify-between items-center text-[#1f1b10]">
+                          <span className="text-base font-black">TOTAL:</span>
+                          <span className="text-xl font-black text-[#2f5ea1] font-mono">
+                            {formatCOP(grandTotal)}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Technical Notes Textarea */}
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-xs font-bold text-[#1f1b10] flex items-center justify-between">
+                          <span className="flex items-center gap-1.5">
+                            <Info className="w-4 h-4 text-[#725c00]" />
+                            Concepto Técnico & Recomendaciones de Aplicación
+                          </span>
+                          <span className="text-[11px] text-[#2f5ea1] font-bold">Editable</span>
+                        </label>
+                        <textarea
+                          value={technicalNotes}
+                          onChange={(e) => setTechnicalNotes(e.target.value)}
+                          className="w-full p-3 bg-[#f6eddb] border border-[#ebe2cf] rounded-xl text-xs sm:text-sm text-[#1f1b10] focus:outline-none focus:ring-2 focus:ring-[#2f5ea1] resize-none leading-relaxed"
+                          rows={3}
+                        />
+                      </div>
+
+                      {/* Bottom Action Buttons */}
+                      <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+                        <button
+                          type="button"
+                          onClick={() => setShowSapModal(true)}
+                          className="px-4 py-2.5 rounded-xl bg-[#f6eddb] hover:bg-[#ebe2cf] text-[#1f1b10] text-xs font-bold flex items-center gap-2 border border-[#d1c6ab]/40 transition-colors cursor-pointer"
+                        >
+                          <FileSpreadsheet className="w-4 h-4 text-[#2f5ea1]" />
+                          <span>Generar Orden SAP</span>
+                        </button>
+
+                        <div className="flex items-center gap-2">
+                          <a
+                            href={`https://wa.me/573124589201?text=Hola%20${encodeURIComponent(
+                              clientName
+                            )},%20te%20comparto%20el%20diagnostico%20oficial%20Pintuco%20${projectCode}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="px-4 py-2.5 rounded-xl bg-[#25D366] text-white hover:bg-[#20ba59] text-xs font-bold flex items-center gap-2 transition-colors shadow-2xs cursor-pointer"
+                          >
+                            <MessageCircle className="w-4 h-4" />
+                            <span>WhatsApp</span>
+                          </a>
+
+                          <button
+                            type="button"
+                            onClick={() => setShowApproveModal(true)}
+                            className="px-5 py-2.5 rounded-xl bg-[#ffd100] text-[#0d4788] hover:bg-[#ffc800] text-xs font-black flex items-center gap-2 transition-all shadow-xs cursor-pointer"
+                          >
+                            <Send className="w-4 h-4" />
+                            <span>Aprobar y Notificar</span>
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </div>
                 </div>
               </div>
-            </div>
+            )}
+
+            {/* VIEW 2: SOLICITUDES PENDIENTES */}
+            {activeAdvisorNav === 'solicitudes' && (
+              <AdvisorRequestsView
+                currentRequest={activeRequest}
+                onSelectRequestForDiagnosis={handleSelectRequestForDiagnosis}
+                onUpdateProject={onUpdateProject}
+                onShowToast={triggerToast}
+              />
+            )}
+
+            {/* VIEW 3: INVENTARIO & STOCK MULTISEDE */}
+            {activeAdvisorNav === 'inventario' && (
+              <AdvisorInventoryView
+                request={activeRequest}
+                onNavigateToFullInventory={onNavigateToInventory}
+                onShowToast={triggerToast}
+                onUpdateProject={onUpdateProject}
+              />
+            )}
+
+            {/* VIEW 4: CATÁLOGO TÉCNICO PINTUCO */}
+            {activeAdvisorNav === 'catalogo' && (
+              <AdvisorCatalogView
+                onAddProductToQuote={handleAddProductToQuote}
+                onShowToast={triggerToast}
+                activeProjectStatus={activeRequest?.status}
+                activeProjectCode={projectCode}
+              />
+            )}
+
+            {/* VIEW 5: HISTORIAL DE COTIZACIONES */}
+            {activeAdvisorNav === 'historial' && (
+              <AdvisorHistoryView
+                request={activeRequest}
+                onOpenPdfModal={() => setShowPdfModal(true)}
+                onShowToast={triggerToast}
+              />
+            )}
           </div>
-
-          {/* ===============================================================
-              RIGHT COLUMN: MOTOR DE CÁLCULO & COTIZACIÓN (55% / Span 7)
-              =============================================================== */}
-          <div className="lg:col-span-7 flex flex-col gap-6">
-            {/* CARD 1: CALCULADORA ASISTIDA POR IA (DOSIFICACIÓN EXACTA) */}
-            <div className="bg-white rounded-2xl shadow-xs border border-[#ebe2cf] p-6 flex flex-col gap-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-xl bg-[#ffd100] flex items-center justify-center text-[#0d4788] font-bold">
-                    <Calculator className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h2 className="text-lg font-black text-[#1f1b10]">
-                      Calculadora Técnica Asistida por IA
-                    </h2>
-                    <p className="text-xs text-[#7f765f]">
-                      Rendimiento volumétrico calibrado según rugosidad y absorción
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-1.5 bg-[#f6eddb] px-3 py-1 rounded-lg self-start sm:self-auto border border-[#d1c6ab]/40">
-                  <span className="text-xs text-[#7f765f]">Merma IA:</span>
-                  <span className="text-xs text-[#1f1b10] font-black">+{mermaPercent}%</span>
-                </div>
-              </div>
-
-              {/* Calculation Formula Matrix Chips */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 p-3 bg-[#fcf3e0] rounded-xl border border-[#ebe2cf] text-center">
-                <div className="flex flex-col p-1">
-                  <span className="text-[11px] text-[#7f765f]">Área Neta</span>
-                  <span className="text-sm font-black text-[#1f1b10]">{projectArea}.0 m²</span>
-                </div>
-                <div className="flex flex-col p-1 border-l border-[#ebe2cf]">
-                  <span className="text-[11px] text-[#7f765f]">Sellador</span>
-                  <span className="text-sm font-black text-[#2f5ea1]">1 Mano</span>
-                </div>
-                <div className="flex flex-col p-1 border-l border-[#ebe2cf]">
-                  <span className="text-[11px] text-[#7f765f]">Viniltex</span>
-                  <span className="text-sm font-black text-[#2f5ea1]">2 Manos</span>
-                </div>
-                <div className="flex flex-col p-1 border-l border-[#ebe2cf]">
-                  <span className="text-[11px] text-[#7f765f]">Factor Cobertura</span>
-                  <span className="text-sm font-black text-[#1f1b10]">94.2%</span>
-                </div>
-              </div>
-
-              {/* Dosification Output Grid */}
-              <div className="flex flex-col gap-2">
-                <span className="text-[11px] text-[#7f765f] uppercase font-bold tracking-wider">
-                  Dosificación de Producto Requerida
-                </span>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  {/* Item 1 Dosificación */}
-                  <div className="p-3.5 rounded-xl bg-[#f6eddb] border border-[#ebe2cf] flex flex-col justify-between gap-3">
-                    <div className="flex flex-col">
-                      <span className="text-[11px] text-[#7f765f]">Muro Acentuado (26.4 m²)</span>
-                      <span className="text-xs sm:text-sm font-bold text-[#1f1b10]">
-                        Viniltex Terracota
-                      </span>
-                      <span className="text-xs text-[#4d4632]">1.5 Galones requeridos</span>
-                    </div>
-                    <div className="flex items-center justify-between bg-white p-2 rounded-lg border border-[#ebe2cf]">
-                      <span className="text-xs font-bold text-[#2f5ea1]">1 Gal + 2 Cuartos</span>
-                      <CheckCircle2 className="w-4 h-4 text-[#725c00]" />
-                    </div>
-                  </div>
-
-                  {/* Item 2 Dosificación */}
-                  <div className="p-3.5 rounded-xl bg-[#f6eddb] border border-[#ebe2cf] flex flex-col justify-between gap-3">
-                    <div className="flex flex-col">
-                      <span className="text-[11px] text-[#7f765f]">Perímetro Blanco (18.6 m²)</span>
-                      <span className="text-xs sm:text-sm font-bold text-[#1f1b10]">
-                        Viniltex Blanco Lienzo
-                      </span>
-                      <span className="text-xs text-[#4d4632]">0.9 Galones requeridos</span>
-                    </div>
-                    <div className="flex items-center justify-between bg-white p-2 rounded-lg border border-[#ebe2cf]">
-                      <span className="text-xs font-bold text-[#2f5ea1]">1 Galón</span>
-                      <CheckCircle2 className="w-4 h-4 text-[#725c00]" />
-                    </div>
-                  </div>
-
-                  {/* Item 3 Dosificación */}
-                  <div className="p-3.5 rounded-xl bg-[#f6eddb] border border-[#ebe2cf] flex flex-col justify-between gap-3">
-                    <div className="flex flex-col">
-                      <span className="text-[11px] text-[#7f765f]">Acondicionamiento (45 m²)</span>
-                      <span className="text-xs sm:text-sm font-bold text-[#1f1b10]">
-                        Sellador Acrílico 501
-                      </span>
-                      <span className="text-xs text-[#4d4632]">Rendimiento: 42 m²/gal</span>
-                    </div>
-                    <div className="flex items-center justify-between bg-white p-2 rounded-lg border border-[#ebe2cf]">
-                      <span className="text-xs font-bold text-[#2f5ea1]">1 Galón</span>
-                      <CheckCircle2 className="w-4 h-4 text-[#725c00]" />
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Adjusters Slider Section */}
-              <div className="p-3.5 rounded-xl bg-[#fcf3e0] border border-[#ebe2cf] flex flex-col sm:flex-row items-center justify-between gap-3">
-                <div className="flex items-center gap-3 w-full sm:w-auto">
-                  <Sliders className="w-5 h-5 text-[#2f5ea1]" />
-                  <div className="flex flex-col">
-                    <span className="text-xs sm:text-sm font-bold text-[#1f1b10]">
-                      Ajuste de Merma Manual
-                    </span>
-                    <span className="text-xs text-[#7f765f]">
-                      Calibración por experiencia de campo
-                    </span>
-                  </div>
-                </div>
-                <div className="flex items-center gap-3 w-full sm:w-64">
-                  <input
-                    type="range"
-                    min="0"
-                    max="20"
-                    value={mermaPercent}
-                    onChange={(e) => setMermaPercent(Number(e.target.value))}
-                    className="w-full accent-[#725c00] cursor-pointer"
-                  />
-                  <span className="text-sm font-black text-[#1f1b10] min-w-[36px] text-right">
-                    {mermaPercent}%
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {/* CARD 2: GENERACIÓN DE PROPUESTA TÉCNICO-COMERCIAL & COTIZACIÓN */}
-            <div className="bg-white rounded-2xl shadow-xs border border-[#ebe2cf] p-6 flex flex-col gap-4">
-              <div className="flex items-center justify-between flex-wrap gap-2">
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-xl bg-[#f0e7d5] flex items-center justify-center text-[#1f1b10]">
-                    <Receipt className="w-5 h-5 text-[#2f5ea1]" />
-                  </div>
-                  <div>
-                    <h2 className="text-lg font-black text-[#1f1b10]">
-                      Propuesta Técnico-Comercial
-                    </h2>
-                    <p className="text-xs text-[#7f765f]">
-                      Valores expresados en COP con lista oficial de precios Pintuco 2024
-                    </p>
-                  </div>
-                </div>
-                <span className="px-3 py-1 rounded bg-[#f0e7d5] font-mono text-xs text-[#7f765f] font-bold">
-                  REF-COT-8924
-                </span>
-              </div>
-
-              {/* Quotation Table */}
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs sm:text-sm text-[#1f1b10]">
-                  <thead>
-                    <tr className="bg-[#f0e7d5] text-[#1f1b10] text-[11px] uppercase tracking-wider font-bold">
-                      <th className="py-2.5 px-3 rounded-l-lg">Ítem / Referencia</th>
-                      <th className="py-2.5 px-2">Presentación</th>
-                      <th className="py-2.5 px-2 text-center">Cant.</th>
-                      <th className="py-2.5 px-3 text-right">Unitario</th>
-                      <th className="py-2.5 px-3 text-right rounded-r-lg">Total</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-[#ebe2cf]/50">
-                    {/* Row 1 */}
-                    <tr className="hover:bg-[#f6eddb]/50 transition-colors">
-                      <td className="py-2.5 px-3">
-                        <div className="flex flex-col">
-                          <span className="font-bold text-[#1f1b10]">
-                            Viniltex Avanzado Antibacterial
-                          </span>
-                          <span className="text-[11px] text-[#7f765f]">
-                            Salmón Terracota #248-A • Cód. 1024589
-                          </span>
-                        </div>
-                      </td>
-                      <td className="py-2.5 px-2 text-xs text-[#4d4632]">Galón</td>
-                      <td className="py-2.5 px-2 text-center font-bold">1</td>
-                      <td className="py-2.5 px-3 text-right text-xs font-mono text-[#4d4632]">
-                        $115.900
-                      </td>
-                      <td className="py-2.5 px-3 text-right font-bold text-[#1f1b10]">
-                        $115.900
-                      </td>
-                    </tr>
-                    {/* Row 2 */}
-                    <tr className="hover:bg-[#f6eddb]/50 transition-colors">
-                      <td className="py-2.5 px-3">
-                        <div className="flex flex-col">
-                          <span className="font-bold text-[#1f1b10]">
-                            Viniltex Avanzado Antibacterial
-                          </span>
-                          <span className="text-[11px] text-[#7f765f]">
-                            Salmón Terracota #248-A • Cód. 1024590
-                          </span>
-                        </div>
-                      </td>
-                      <td className="py-2.5 px-2 text-xs text-[#4d4632]">Cuarto (1/4 Gal)</td>
-                      <td className="py-2.5 px-2 text-center font-bold">2</td>
-                      <td className="py-2.5 px-3 text-right text-xs font-mono text-[#4d4632]">
-                        $34.000
-                      </td>
-                      <td className="py-2.5 px-3 text-right font-bold text-[#1f1b10]">
-                        $68.000
-                      </td>
-                    </tr>
-                    {/* Row 3 */}
-                    <tr className="hover:bg-[#f6eddb]/50 transition-colors">
-                      <td className="py-2.5 px-3">
-                        <div className="flex flex-col">
-                          <span className="font-bold text-[#1f1b10]">
-                            Viniltex Avanzado Antibacterial
-                          </span>
-                          <span className="text-[11px] text-[#7f765f]">
-                            Blanco Lienzo #100-B • Cód. 1024501
-                          </span>
-                        </div>
-                      </td>
-                      <td className="py-2.5 px-2 text-xs text-[#4d4632]">Galón</td>
-                      <td className="py-2.5 px-2 text-center font-bold">1</td>
-                      <td className="py-2.5 px-3 text-right text-xs font-mono text-[#4d4632]">
-                        $112.900
-                      </td>
-                      <td className="py-2.5 px-3 text-right font-bold text-[#1f1b10]">
-                        $112.900
-                      </td>
-                    </tr>
-                    {/* Row 4 */}
-                    <tr className="hover:bg-[#f6eddb]/50 transition-colors">
-                      <td className="py-2.5 px-3">
-                        <div className="flex flex-col">
-                          <span className="font-bold text-[#1f1b10]">
-                            Sellador Acrílico Antihumedad 501
-                          </span>
-                          <span className="text-[11px] text-[#7f765f]">
-                            Base Acrílica Sellante • Cód. 1018944
-                          </span>
-                        </div>
-                      </td>
-                      <td className="py-2.5 px-2 text-xs text-[#4d4632]">Galón</td>
-                      <td className="py-2.5 px-2 text-center font-bold">1</td>
-                      <td className="py-2.5 px-3 text-right text-xs font-mono text-[#4d4632]">
-                        $74.500
-                      </td>
-                      <td className="py-2.5 px-3 text-right font-bold text-[#1f1b10]">
-                        $74.500
-                      </td>
-                    </tr>
-                    {/* Row 5 */}
-                    <tr className="hover:bg-[#f6eddb]/50 transition-colors">
-                      <td className="py-2.5 px-3">
-                        <div className="flex flex-col">
-                          <span className="font-bold text-[#1f1b10]">
-                            Kit de Aplicación & Resane Pro
-                          </span>
-                          <span className="text-[11px] text-[#7f765f]">
-                            Rodillo Felpa 9" + Cinta Azul 1.5" + Masilla 1kg
-                          </span>
-                        </div>
-                      </td>
-                      <td className="py-2.5 px-2 text-xs text-[#4d4632]">Kit Completo</td>
-                      <td className="py-2.5 px-2 text-center font-bold">1</td>
-                      <td className="py-2.5 px-3 text-right text-xs font-mono text-[#4d4632]">
-                        $48.500
-                      </td>
-                      <td className="py-2.5 px-3 text-right font-bold text-[#1f1b10]">
-                        $48.500
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Total Calculation Ledger */}
-              <div className="bg-[#fcf3e0] p-4 rounded-xl border border-[#ebe2cf] flex flex-col gap-2 ml-auto w-full md:w-80">
-                <div className="flex justify-between items-center text-xs text-[#4d4632]">
-                  <span>Subtotal Productos:</span>
-                  <span className="font-mono text-[#1f1b10] font-bold">
-                    {formatCOP(subtotal)}
-                  </span>
-                </div>
-                <div className="flex justify-between items-center text-xs text-[#ba1a1a] font-medium">
-                  <span className="flex items-center gap-1">
-                    <span>Descuento Asesor (-10%)</span>
-                  </span>
-                  <span className="font-mono">-{formatCOP(discountAmount)}</span>
-                </div>
-                <div className="flex justify-between items-center text-xs text-[#4d4632]">
-                  <span>IVA (19%):</span>
-                  <span className="font-mono text-[#1f1b10] font-bold">
-                    {formatCOP(ivaAmount)}
-                  </span>
-                </div>
-                <div className="h-px bg-[#d1c6ab] my-0.5"></div>
-                <div className="flex justify-between items-center text-[#1f1b10]">
-                  <span className="text-base font-black">TOTAL:</span>
-                  <span className="text-xl font-black text-[#2f5ea1] font-mono">
-                    {formatCOP(grandTotal)}
-                  </span>
-                </div>
-                <span className="text-[10px] text-[#7f765f] text-right">
-                  Precios netos en Pesos Colombianos (COP)
-                </span>
-              </div>
-
-              {/* Technical Notes Textarea Pre-filled by AI */}
-              <div className="flex flex-col gap-1.5">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-bold text-[#1f1b10] flex items-center gap-1.5">
-                    <Info className="w-4 h-4 text-[#725c00]" />
-                    <span>Concepto Técnico & Recomendaciones de Aplicación</span>
-                  </label>
-                  <span className="text-[11px] text-[#2f5ea1] font-bold">
-                    Generado por IA • Editable
-                  </span>
-                </div>
-                <textarea
-                  value={technicalNotes}
-                  onChange={(e) => setTechnicalNotes(e.target.value)}
-                  className="w-full p-3.5 bg-[#f6eddb] border border-[#ebe2cf] rounded-xl text-xs sm:text-sm text-[#1f1b10] focus:outline-none focus:ring-2 focus:ring-[#2f5ea1] resize-none leading-relaxed"
-                  rows={3}
-                />
-              </div>
-
-              {/* Shipping Logistics Selector */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3.5 bg-[#f6eddb] border border-[#ebe2cf] rounded-xl">
-                <div className="flex items-center gap-3">
-                  <Truck className="w-6 h-6 text-[#2f5ea1] shrink-0" />
-                  <div className="flex flex-col">
-                    <span className="text-xs font-bold text-[#1f1b10]">
-                      Envío a Domicilio (Bogotá)
-                    </span>
-                    <span className="text-[11px] text-[#2f5ea1] font-bold">
-                      Gratis (Compra superior a $200.000)
-                    </span>
-                  </div>
-                </div>
-                <div className="flex items-center justify-start sm:justify-end gap-2">
-                  <span className="text-xs text-[#7f765f]">Fecha Estimada:</span>
-                  <span className="px-3 py-1 rounded-lg bg-white border border-[#ebe2cf] text-xs font-bold text-[#1f1b10]">
-                    24 de Mayo, 2024
-                  </span>
-                </div>
-              </div>
-
-              {/* Final Commercial Dispatch Actions Bar */}
-              <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowSapModal(true)}
-                  className="flex-1 sm:flex-none px-4 py-2.5 rounded-xl bg-[#f6eddb] hover:bg-[#f0e7d5] text-[#1f1b10] text-xs sm:text-sm font-bold flex items-center justify-center gap-2 border border-[#d1c6ab]/40 transition-colors cursor-pointer"
-                  id="btn-generate-sap"
-                >
-                  <FileSpreadsheet className="w-4 h-4 text-[#2f5ea1]" />
-                  <span>Generar Orden SAP</span>
-                </button>
-
-                <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
-                  <a
-                    href={`https://wa.me/573124589201?text=Hola%20${encodeURIComponent(
-                      clientName
-                    )},%20te%20comparto%20el%20diagnostico%20oficial%20Pintuco%20${projectCode}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="flex-1 sm:flex-none px-4 py-2.5 rounded-xl bg-[#25D366] text-white hover:bg-[#20ba59] text-xs sm:text-sm font-bold flex items-center justify-center gap-2 transition-colors shadow-2xs cursor-pointer"
-                  >
-                    <MessageCircle className="w-4 h-4" />
-                    <span>WhatsApp Cliente</span>
-                  </a>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      triggerToast('Cotización oficial REF-COT-8924 enviada al cliente por correo');
-                    }}
-                    className="flex-1 sm:flex-none px-5 py-2.5 rounded-xl bg-[#2f5ea1] text-white hover:bg-[#264b82] text-xs sm:text-sm font-bold flex items-center justify-center gap-2 transition-colors shadow-xs cursor-pointer"
-                    id="btn-send-official-quote"
-                  >
-                    <Send className="w-4 h-4" />
-                    <span>Enviar Cotización Oficial</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+        </main>
       </div>
-
-      {/* ===================================================================
-          PINTUCO PRO INTERNAL FOOTER
-          =================================================================== */}
-      <footer className="w-full bg-[#fcf3e0] border-t border-[#ebe2cf] mt-12">
-        <div className="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 py-8 flex flex-col md:flex-row items-center justify-between gap-6">
-          <div className="flex flex-col items-center md:items-start gap-1">
-            <div className="flex items-center gap-2">
-              <span className="text-base font-black text-[#1f1b10]">PINTUCO</span>
-              <span className="text-xs text-[#7f765f]">
-                | Red Interna de Asistencia Técnica
-              </span>
-            </div>
-            <p className="text-xs text-[#4d4632] text-center md:text-left">
-              Plataforma corporativa exclusiva para consultores y asesores de recubrimientos
-              industriales y arquitectónicos.
-            </p>
-          </div>
-
-          <div className="flex flex-wrap items-center justify-center gap-6 text-xs text-[#4d4632] font-semibold">
-            <a href="#" className="hover:text-[#1f1b10] transition-colors">
-              Mesa de Ayuda TI Interna
-            </a>
-            <a href="#" className="hover:text-[#1f1b10] transition-colors">
-              Políticas de Garantías y Laboratorio
-            </a>
-            <a href="#" className="hover:text-[#1f1b10] transition-colors">
-              Fichas de Seguridad (MSDS)
-            </a>
-          </div>
-
-          <div className="text-xs text-[#7f765f] text-center md:text-right">
-            © 2024 Pintuco S.A. Todos los derechos reservados. Uso estrictamente confidencial.
-          </div>
-        </div>
-      </footer>
 
       {/* ===================================================================
           MODALS: PDF PREVIEW, SAP ORDER & APPROVAL
@@ -1198,8 +1281,8 @@ export const AdvisorEvaluationScreen: React.FC<AdvisorEvaluationScreenProps> = (
                   <p className="text-[11px] text-[#7f765f]">NIT 890.900.123-1 • Rionegro, Antioquia</p>
                 </div>
                 <div className="text-right">
-                  <span className="font-mono font-bold text-[#2f5ea1]">REF-COT-8924</span>
-                  <p className="text-[11px] text-[#7f765f]">Emisión: 12 Mayo 2024</p>
+                  <span className="font-mono font-bold text-[#2f5ea1]">{projectCode}</span>
+                  <p className="text-[11px] text-[#7f765f]">Emisión: {new Date().toLocaleDateString('es-CO')}</p>
                 </div>
               </div>
 
@@ -1214,6 +1297,30 @@ export const AdvisorEvaluationScreen: React.FC<AdvisorEvaluationScreenProps> = (
                   <strong className="text-sm">{currentUser?.fullName || 'Ing. Carlos Ruiz'}</strong>
                   <p className="text-xs text-[#4d4632]">Consultor Técnico Senior Pintuco</p>
                 </div>
+              </div>
+
+              {/* Items List in PDF */}
+              <div className="bg-white p-3 rounded-xl border border-[#ebe2cf]">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-[#ebe2cf] text-[#7f765f] uppercase text-[10px]">
+                      <th className="py-1 text-left">Ítem</th>
+                      <th className="py-1 text-center">Cant.</th>
+                      <th className="py-1 text-right">Unitario</th>
+                      <th className="py-1 text-right">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[#ebe2cf]/50">
+                    {quoteItems.map((item, idx) => (
+                      <tr key={idx}>
+                        <td className="py-1.5 font-medium">{item.name}</td>
+                        <td className="py-1.5 text-center">{item.quantity}</td>
+                        <td className="py-1.5 text-right font-mono">{formatCOP(item.unitPriceCOP)}</td>
+                        <td className="py-1.5 text-right font-mono font-bold">{formatCOP(item.totalCOP)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
 
               <div className="p-3 rounded-lg bg-white border border-[#ebe2cf]">
@@ -1306,9 +1413,9 @@ export const AdvisorEvaluationScreen: React.FC<AdvisorEvaluationScreenProps> = (
                 type="button"
                 onClick={() => {
                   setShowSapModal(false);
-                  if (request && onUpdateProject) {
+                  if (activeRequest && onUpdateProject) {
                     onUpdateProject({
-                      ...request,
+                      ...activeRequest,
                       status: 'Inventario Asignado',
                       technicalReviewNotes: technicalNotes,
                     });
@@ -1354,9 +1461,9 @@ export const AdvisorEvaluationScreen: React.FC<AdvisorEvaluationScreenProps> = (
                 type="button"
                 onClick={() => {
                   setShowApproveModal(false);
-                  if (request && onUpdateProject) {
+                  if (activeRequest && onUpdateProject) {
                     onUpdateProject({
-                      ...request,
+                      ...activeRequest,
                       status: 'Inventario Asignado',
                       technicalReviewNotes: technicalNotes,
                     });
@@ -1371,6 +1478,14 @@ export const AdvisorEvaluationScreen: React.FC<AdvisorEvaluationScreenProps> = (
           </div>
         </div>
       )}
+
+      {/* 4. Advisor Project Status Management Modal */}
+      <AdvisorStatusModal
+        isOpen={showStatusModal}
+        onClose={() => setShowStatusModal(false)}
+        request={activeRequest}
+        onSaveStatus={handleSaveProjectStatus}
+      />
     </div>
   );
 };

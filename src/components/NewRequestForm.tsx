@@ -24,18 +24,22 @@ import {
   UserCheck,
   Palette,
   Disc,
+  ShoppingBag,
+  ArrowRight,
 } from 'lucide-react';
 
 interface NewRequestFormProps {
   onSubmitRequest: (request: ProjectRequest) => void;
   isProcessingAI: boolean;
   currentUser?: UserProfile | null;
+  onNavigateToStore?: () => void;
 }
 
 export const NewRequestForm: React.FC<NewRequestFormProps> = ({
   onSubmitRequest,
   isProcessingAI,
   currentUser,
+  onNavigateToStore,
 }) => {
   // Form State
   const [fullName, setFullName] = useState(currentUser?.fullName || 'Constructora Andina SAS');
@@ -216,7 +220,7 @@ export const NewRequestForm: React.FC<NewRequestFormProps> = ({
         {/* Right Column: Form (Exact Design Match) */}
         <div className="w-full lg:w-2/3">
           {/* Header Title */}
-          <div className="mb-8">
+          <div className="mb-6">
             <h1 className="text-3xl sm:text-4xl lg:text-5xl font-black text-[#1f1b10] tracking-tight mb-2">
               Nueva Solicitud
             </h1>
@@ -224,6 +228,39 @@ export const NewRequestForm: React.FC<NewRequestFormProps> = ({
               Proporciona los detalles de tu proyecto para comenzar con recubrimientos profesionales y formulación automatizada.
             </p>
           </div>
+
+          {/* Quick Direct Purchase Banner (Buy without project) */}
+          {onNavigateToStore && (
+            <div className="mb-8 p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-[#e1edff] via-[#f0f6ff] to-[#fff8f0] border border-[#bfdbfe] shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-start sm:items-center gap-3.5">
+                <div className="w-10 h-10 rounded-xl bg-[#0d4788] text-[#ffd100] flex items-center justify-center shrink-0 shadow-xs">
+                  <ShoppingBag className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs font-black px-2 py-0.5 rounded-full bg-[#0d4788] text-white">
+                      Compra Rápida
+                    </span>
+                    <h3 className="text-sm sm:text-base font-bold text-[#0d4788]">
+                      ¿Solo necesitas comprar pintura o herramientas sin proyecto?
+                    </h3>
+                  </div>
+                  <p className="text-xs text-[#4d4632] mt-0.5">
+                    Adquiere directo con entrega en 24h a nivel nacional sin necesidad de diagnósticos ni aprobaciones.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={onNavigateToStore}
+                className="px-4 py-2.5 rounded-xl bg-[#ffd100] hover:bg-[#ffc800] text-[#0d4788] font-black text-xs shadow-xs transition-all flex items-center justify-center gap-1.5 shrink-0 cursor-pointer hover:scale-[1.02]"
+                id="btn-goto-direct-store-from-form"
+              >
+                <span>Comprar en Tienda Directa</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            </div>
+          )}
 
           <form onSubmit={handleSubmit} className="space-y-8" id="colorlink-request-form">
             {/* Section 1: Datos del Cliente */}

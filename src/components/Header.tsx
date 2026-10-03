@@ -15,6 +15,8 @@ import {
   Clock,
   Warehouse,
   Database,
+  ShoppingBag,
+  ShoppingCart,
 } from 'lucide-react';
 
 interface HeaderProps {
@@ -23,6 +25,8 @@ interface HeaderProps {
   currentRequest: ProjectRequest | null;
   currentUser: UserProfile | null;
   supabaseConnected?: boolean | null;
+  cartItemsCount?: number;
+  onOpenCart?: () => void;
   onLogout: () => void;
   onOpenSupport: () => void;
   onOpenServices: () => void;
@@ -34,6 +38,8 @@ export const Header: React.FC<HeaderProps> = ({
   currentRequest,
   currentUser,
   supabaseConnected,
+  cartItemsCount = 0,
+  onOpenCart,
   onLogout,
   onOpenSupport,
   onOpenServices,
@@ -86,6 +92,27 @@ export const Header: React.FC<HeaderProps> = ({
           >
             <Layers className="w-4 h-4 text-[#2f5ea1]" />
             <span className="hidden sm:inline">Servicios</span>
+          </button>
+
+          {/* Direct Store Button (Accessible with or without an active project) */}
+          <button
+            onClick={() => setActiveTab('direct_store')}
+            className={`px-3 sm:px-3.5 py-2 rounded-xl text-sm font-bold transition-all flex items-center gap-1.5 relative ${
+              activeTab === 'direct_store'
+                ? 'text-[#0d4788] bg-[#ffd100] shadow-2xs font-black'
+                : 'text-[#1f1b10] hover:text-[#0d4788] hover:bg-[#f6eddb]'
+            }`}
+            id="nav-direct-store-btn"
+          >
+            <ShoppingBag className="w-4 h-4 text-[#0d4788]" />
+            <span className="hidden sm:inline">Comprar Directo</span>
+            <span className="sm:hidden">Tienda</span>
+            <span className="hidden lg:inline text-[10px] font-black px-1.5 py-0.2 rounded-full bg-[#0d4788] text-white">
+              Sin Proyecto
+            </span>
+            {activeTab === 'direct_store' && (
+              <span className="absolute bottom-0 left-4 right-4 h-0.5 bg-[#0d4788] rounded-full"></span>
+            )}
           </button>
 
           {currentUser ? (
@@ -186,6 +213,32 @@ export const Header: React.FC<HeaderProps> = ({
             <span className="w-1.5 h-1.5 rounded-full shrink-0 animate-pulse bg-current"></span>
             <span>{supabaseConnected ? 'Supabase Conectado' : 'Supabase Listo'}</span>
           </div>
+
+          {/* Direct Store Shopping Cart Button */}
+          <button
+            type="button"
+            onClick={() => {
+              if (activeTab === 'direct_store' && onOpenCart) {
+                onOpenCart();
+              } else {
+                setActiveTab('direct_store');
+              }
+            }}
+            className={`relative p-2 rounded-full transition-all flex items-center justify-center border cursor-pointer ${
+              activeTab === 'direct_store'
+                ? 'bg-[#ffd100] border-[#0d4788] text-[#0d4788] shadow-xs'
+                : 'bg-white border-[#d1c6ab] text-[#1f1b10] hover:text-[#0d4788] hover:border-[#0d4788] hover:bg-[#fffdfa]'
+            }`}
+            title="Carrito de Compras Tienda Directa"
+            id="header-cart-btn"
+          >
+            <ShoppingCart className="w-4 h-4 sm:w-4.5 sm:h-4.5 text-[#0d4788]" />
+            {cartItemsCount > 0 && (
+              <span className="absolute -top-1.5 -right-1.5 bg-[#d9381e] text-white text-[10px] font-black w-4.5 h-4.5 sm:w-5 sm:h-5 rounded-full flex items-center justify-center shadow-xs ring-2 ring-white">
+                {cartItemsCount > 99 ? '99+' : cartItemsCount}
+              </span>
+            )}
+          </button>
 
           {currentUser ? (
             /* Logged In User Dropdown */

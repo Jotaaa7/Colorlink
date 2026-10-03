@@ -44,6 +44,7 @@ interface AdvisorInventoryScreenProps {
   onNavigateHome: () => void;
   onNavigateToDiagnosis?: () => void;
   onUpdateProject?: (updatedRequest: ProjectRequest) => void;
+  isEmbedded?: boolean;
 }
 
 interface ProductItem {
@@ -84,6 +85,7 @@ export const AdvisorInventoryScreen: React.FC<AdvisorInventoryScreenProps> = ({
   onNavigateHome,
   onNavigateToDiagnosis,
   onUpdateProject,
+  isEmbedded = false,
 }) => {
   // Check authorization (RBAC)
   const isAuthorized =
@@ -442,100 +444,102 @@ export const AdvisorInventoryScreen: React.FC<AdvisorInventoryScreenProps> = ({
       {/* ===================================================================
           PINTUCO PRO PORTAL NAVBAR (MATCHING THE SCREENSHOT EXACTLY)
           =================================================================== */}
-      <header className="w-full bg-[#fff8f0]/95 backdrop-blur-xl border-b border-[#ebe2cf] sticky top-0 z-40 shadow-xs">
-        <div className="h-20 w-full px-4 sm:px-6 lg:px-12 flex items-center justify-between gap-6 max-w-[1440px] mx-auto">
-          {/* Logo & Brand Identity */}
-          <div className="flex items-center gap-4 shrink-0">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-[#ffd100] flex items-center justify-center text-[#0d4788] shadow-xs">
-                <Palette className="w-6 h-6 stroke-[2.2]" />
+      {!isEmbedded && (
+        <header className="w-full bg-[#fff8f0]/95 backdrop-blur-xl border-b border-[#ebe2cf] sticky top-0 z-40 shadow-xs">
+          <div className="h-20 w-full px-4 sm:px-6 lg:px-12 flex items-center justify-between gap-6 max-w-[1440px] mx-auto">
+            {/* Logo & Brand Identity */}
+            <div className="flex items-center gap-4 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-lg bg-[#ffd100] flex items-center justify-center text-[#0d4788] shadow-xs">
+                  <Palette className="w-6 h-6 stroke-[2.2]" />
+                </div>
+                <div className="flex flex-col">
+                  <span className="text-xl sm:text-2xl font-black tracking-tight text-[#1f1b10] leading-none">
+                    PINTUCO
+                  </span>
+                  <span className="text-[11px] font-bold text-[#2f5ea1] uppercase tracking-wider mt-0.5">
+                    Portal Técnico & Logístico
+                  </span>
+                </div>
               </div>
-              <div className="flex flex-col">
-                <span className="text-xl sm:text-2xl font-black tracking-tight text-[#1f1b10] leading-none">
-                  PINTUCO
-                </span>
-                <span className="text-[11px] font-bold text-[#2f5ea1] uppercase tracking-wider mt-0.5">
-                  Portal Técnico & Logístico
-                </span>
-              </div>
+
+              {/* Nav Tabs */}
+              <nav className="hidden xl:flex items-center gap-1 px-2 py-1 bg-[#fcf3e0] rounded-xl border border-[#ebe2cf] ml-4">
+                <button
+                  type="button"
+                  onClick={() => onNavigateToDiagnosis?.()}
+                  className="px-3.5 py-2 text-[#4d4632] hover:text-[#1f1b10] text-xs font-semibold rounded-lg transition-colors cursor-pointer"
+                >
+                  Solicitudes
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => onNavigateToDiagnosis?.()}
+                  className="px-3.5 py-2 text-[#4d4632] hover:text-[#1f1b10] text-xs font-semibold rounded-lg transition-colors cursor-pointer"
+                >
+                  Diagnóstico & IA
+                </button>
+
+                <button
+                  type="button"
+                  className="px-3.5 py-2 bg-[#ffd100] text-[#0d4788] text-xs font-black rounded-lg shadow-2xs transition-colors"
+                >
+                  Inventario & Disponibilidad
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => triggerToast('Abriendo Catálogo Técnico Pintuco 2024', 'info')}
+                  className="px-3.5 py-2 text-[#4d4632] hover:text-[#1f1b10] text-xs font-semibold rounded-lg transition-colors cursor-pointer"
+                >
+                  Catálogo Técnico
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => triggerToast('Cargando historial de reservas y pedidos SAP', 'info')}
+                  className="px-3.5 py-2 text-[#4d4632] hover:text-[#1f1b10] text-xs font-semibold rounded-lg transition-colors cursor-pointer"
+                >
+                  Historial
+                </button>
+              </nav>
             </div>
 
-            {/* Nav Tabs */}
-            <nav className="hidden xl:flex items-center gap-1 px-2 py-1 bg-[#fcf3e0] rounded-xl border border-[#ebe2cf] ml-4">
-              <button
-                type="button"
-                onClick={() => onNavigateToDiagnosis?.()}
-                className="px-3.5 py-2 text-[#4d4632] hover:text-[#1f1b10] text-xs font-semibold rounded-lg transition-colors cursor-pointer"
-              >
-                Solicitudes
-              </button>
+            {/* Right Section: Quick Search, Online Badge & Advisor Profile */}
+            <div className="flex items-center gap-4 shrink-0">
+              <div className="hidden md:flex items-center gap-2 bg-[#f6eddb] px-3.5 py-2 rounded-xl border border-[#d1c6ab]/40">
+                <Search className="w-4 h-4 text-[#7f765f]" />
+                <input
+                  type="text"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  placeholder="Buscar SKU, producto o lote..."
+                  className="bg-transparent border-none outline-none text-xs text-[#1f1b10] placeholder:text-[#7f765f] w-48 lg:w-60 font-medium"
+                />
+              </div>
 
-              <button
-                type="button"
-                onClick={() => onNavigateToDiagnosis?.()}
-                className="px-3.5 py-2 text-[#4d4632] hover:text-[#1f1b10] text-xs font-semibold rounded-lg transition-colors cursor-pointer"
-              >
-                Diagnóstico & IA
-              </button>
+              <div className="hidden sm:flex items-center gap-1.5 px-3 py-1 bg-[#f0e7d5] rounded-full border border-[#d1c6ab]/40">
+                <span className="w-2.5 h-2.5 rounded-full bg-[#2f5ea1] animate-pulse"></span>
+                <span className="text-xs text-[#1f1b10] font-semibold">En línea</span>
+              </div>
 
-              <button
-                type="button"
-                className="px-3.5 py-2 bg-[#ffd100] text-[#0d4788] text-xs font-black rounded-lg shadow-2xs transition-colors"
-              >
-                Inventario & Disponibilidad
-              </button>
-
-              <button
-                type="button"
-                onClick={() => triggerToast('Abriendo Catálogo Técnico Pintuco 2024', 'info')}
-                className="px-3.5 py-2 text-[#4d4632] hover:text-[#1f1b10] text-xs font-semibold rounded-lg transition-colors cursor-pointer"
-              >
-                Catálogo Técnico
-              </button>
-
-              <button
-                type="button"
-                onClick={() => triggerToast('Cargando historial de reservas y pedidos SAP', 'info')}
-                className="px-3.5 py-2 text-[#4d4632] hover:text-[#1f1b10] text-xs font-semibold rounded-lg transition-colors cursor-pointer"
-              >
-                Historial
-              </button>
-            </nav>
+              {/* Profile Pill */}
+              <div className="flex items-center gap-2.5 pl-2 border-l border-[#d1c6ab]">
+                <div className="hidden lg:flex flex-col text-right">
+                  <span className="text-xs font-bold text-[#1f1b10] leading-tight">
+                    {currentUser?.fullName || 'Ing. Carlos Ruiz'}
+                  </span>
+                  <span className="text-[11px] text-[#7f765f]">Consultor Técnico Senior</span>
+                </div>
+                <div className="w-8 h-8 rounded-full bg-[#725c00] text-white flex items-center justify-center shadow-xs">
+                  <User className="w-4 h-4" />
+                </div>
+              </div>
+            </div>
           </div>
-
-          {/* Right Section: Quick Search, Online Badge & Advisor Profile */}
-          <div className="flex items-center gap-4 shrink-0">
-            <div className="hidden md:flex items-center gap-2 bg-[#f6eddb] px-3.5 py-2 rounded-xl border border-[#d1c6ab]/40">
-              <Search className="w-4 h-4 text-[#7f765f]" />
-              <input
-                type="text"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Buscar SKU, producto o lote..."
-                className="bg-transparent border-none outline-none text-xs text-[#1f1b10] placeholder:text-[#7f765f] w-48 lg:w-60 font-medium"
-              />
-            </div>
-
-            <div className="hidden sm:flex items-center gap-1.5 px-3 py-1 bg-[#f0e7d5] rounded-full border border-[#d1c6ab]/40">
-              <span className="w-2.5 h-2.5 rounded-full bg-[#2f5ea1] animate-pulse"></span>
-              <span className="text-xs text-[#1f1b10] font-semibold">En línea</span>
-            </div>
-
-            {/* Profile Pill */}
-            <div className="flex items-center gap-2.5 pl-2 border-l border-[#d1c6ab]">
-              <div className="hidden lg:flex flex-col text-right">
-                <span className="text-xs font-bold text-[#1f1b10] leading-tight">
-                  {currentUser?.fullName || 'Ing. Carlos Ruiz'}
-                </span>
-                <span className="text-[11px] text-[#7f765f]">Consultor Técnico Senior</span>
-              </div>
-              <div className="w-8 h-8 rounded-full bg-[#725c00] text-white flex items-center justify-center shadow-xs">
-                <User className="w-4 h-4" />
-              </div>
-            </div>
-          </div>
-        </div>
-      </header>
+        </header>
+      )}
 
       {/* ===================================================================
           BREADCRUMB & HEADER SECTION

@@ -21,19 +21,24 @@ import {
   DollarSign,
   AlertCircle,
   HelpCircle,
+  Lock,
 } from 'lucide-react';
+import { getProjectPhaseLockInfo } from '../lib/projectStatusRules';
 
 interface AddProductModalProps {
   isOpen: boolean;
   onClose: () => void;
   onAddProduct: (item: QuotationItem) => void;
+  projectStatus?: string;
 }
 
 export const AddProductModal: React.FC<AddProductModalProps> = ({
   isOpen,
   onClose,
   onAddProduct,
+  projectStatus,
 }) => {
+  const lockInfo = getProjectPhaseLockInfo(projectStatus);
   const [activeTab, setActiveTab] = useState<'catalog' | 'manual'>('catalog');
 
   // Catalog tab state
@@ -118,6 +123,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
 
   // Submit adding catalog item
   const handleAddCatalogItem = () => {
+    if (!lockInfo.canAddProducts) return;
     const total = selectedCatalogItem.priceCOP * Math.max(1, quantity);
     const itemToAdd: QuotationItem = {
       sku: selectedCatalogItem.sku,
@@ -145,6 +151,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
   // Submit adding manual item
   const handleAddManualItem = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!lockInfo.canAddProducts) return;
     if (!manualName.trim()) return;
 
     const total = manualUnitPrice * Math.max(1, manualQuantity);
@@ -233,6 +240,19 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
               </button>
             </div>
           </div>
+
+          {/* Phase Lock Warning Banner */}
+          {!lockInfo.canAddProducts && (
+            <div className="p-4 mx-4 sm:mx-6 mt-4 rounded-2xl bg-amber-50 border border-amber-300 text-xs text-amber-950 flex items-start gap-3">
+              <Lock className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
+              <div>
+                <strong className="block font-bold">
+                  Formulación bloqueada en estado "{projectStatus}" ({lockInfo.badgeLabel})
+                </strong>
+                <span>{lockInfo.reason}</span>
+              </div>
+            </div>
+          )}
 
           {/* Body Content */}
           <div className="p-5 sm:p-6 flex-1 space-y-6">
@@ -514,14 +534,26 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
                       </span>
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={handleAddCatalogItem}
-                      className="w-full sm:w-auto px-7 py-3 rounded-full bg-[#ffd100] hover:bg-[#ffc800] text-[#1f1b10] font-black text-sm shadow-sm hover:shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
-                    >
-                      <Plus className="w-4 h-4 stroke-[3]" />
-                      <span>Agregar Producto al Proyecto</span>
-                    </button>
+                    {lockInfo.canAddProducts ? (
+                      <button
+                        type="button"
+                        onClick={handleAddCatalogItem}
+                        className="w-full sm:w-auto px-7 py-3 rounded-full bg-[#ffd100] hover:bg-[#ffc800] text-[#1f1b10] font-black text-sm shadow-sm hover:shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
+                      >
+                        <Plus className="w-4 h-4 stroke-[3]" />
+                        <span>Agregar Producto al Proyecto</span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled
+                        className="w-full sm:w-auto px-7 py-3 rounded-full bg-[#f0e7d5] text-[#7f765f] font-bold text-sm border border-[#d1c6ab] cursor-not-allowed opacity-80 flex items-center justify-center gap-2"
+                        title={lockInfo.reason}
+                      >
+                        <Lock className="w-4 h-4 text-[#7f765f]" />
+                        <span>Adición Bloqueada ({lockInfo.badgeLabel})</span>
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -723,13 +755,25 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
                     </span>
                   </div>
 
-                  <button
-                    type="submit"
-                    className="w-full sm:w-auto px-7 py-3 rounded-full bg-[#ffd100] hover:bg-[#ffc800] text-[#1f1b10] font-black text-sm shadow-sm hover:shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
-                  >
-                    <Plus className="w-4 h-4 stroke-[3]" />
-                    <span>Guardar Producto en el Proyecto</span>
-                  </button>
+                  {lockInfo.canAddProducts ? (
+                    <button
+                      type="submit"
+                      className="w-full sm:w-auto px-7 py-3 rounded-full bg-[#ffd100] hover:bg-[#ffc800] text-[#1f1b10] font-black text-sm shadow-sm hover:shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      <Plus className="w-4 h-4 stroke-[3]" />
+                      <span>Guardar Producto en el Proyecto</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled
+                      className="w-full sm:w-auto px-7 py-3 rounded-full bg-[#f0e7d5] text-[#7f765f] font-bold text-sm border border-[#d1c6ab] cursor-not-allowed opacity-80 flex items-center justify-center gap-2"
+                      title={lockInfo.reason}
+                    >
+                      <Lock className="w-4 h-4 text-[#7f765f]" />
+                      <span>Guardado Bloqueado ({lockInfo.badgeLabel})</span>
+                    </button>
+                  )}
                 </div>
               </form>
             )}
