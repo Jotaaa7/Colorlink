@@ -8,6 +8,7 @@ import { AuthScreen, DEMO_USERS } from './components/AuthScreen';
 import { ProjectStatusScreen } from './components/ProjectStatusScreen';
 import { AdvisorEvaluationScreen } from './components/AdvisorEvaluationScreen';
 import { AdvisorInventoryScreen } from './components/AdvisorInventoryScreen';
+import { DirectStoreScreen } from './components/DirectStoreScreen';
 import { ServicesModal } from './components/ServicesModal';
 import { SupportModal } from './components/SupportModal';
 import { Footer } from './components/Footer';
@@ -46,6 +47,51 @@ export default function App() {
   const [isProcessingAI, setIsProcessingAI] = useState(false);
   const [isServicesOpen, setIsServicesOpen] = useState(false);
   const [isSupportOpen, setIsSupportOpen] = useState(false);
+  const [isStoreCartOpen, setIsStoreCartOpen] = useState(false);
+
+  // Cart count for direct store shopping
+  const [cartItemsCount, setCartItemsCount] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('colorlink_direct_cart');
+      if (saved) {
+        const items = JSON.parse(saved);
+        return Array.isArray(items)
+          ? items.reduce((acc: number, it: any) => acc + (it.quantity || 1), 0)
+          : 0;
+      }
+    } catch {
+      // ignore
+    }
+    return 0;
+  });
+
+  // Sync cart count across changes & events
+  useEffect(() => {
+    const handleCartSync = () => {
+      try {
+        const saved = localStorage.getItem('colorlink_direct_cart');
+        if (saved) {
+          const items = JSON.parse(saved);
+          setCartItemsCount(
+            Array.isArray(items)
+              ? items.reduce((acc: number, it: any) => acc + (it.quantity || 1), 0)
+              : 0
+          );
+        } else {
+          setCartItemsCount(0);
+        }
+      } catch {
+        setCartItemsCount(0);
+      }
+    };
+
+    window.addEventListener('storage', handleCartSync);
+    window.addEventListener('colorlink_cart_change', handleCartSync);
+    return () => {
+      window.removeEventListener('storage', handleCartSync);
+      window.removeEventListener('colorlink_cart_change', handleCartSync);
+    };
+  }, []);
 
   // Initialize Supabase and check live database connection
   useEffect(() => {
@@ -376,6 +422,11 @@ export default function App() {
         currentRequest={currentRequest}
         currentUser={currentUser}
         supabaseConnected={supabaseConnected}
+        cartItemsCount={cartItemsCount}
+        onOpenCart={() => {
+          setActiveTab('direct_store');
+          setIsStoreCartOpen(true);
+        }}
         onLogout={handleLogout}
         onOpenSupport={() => setIsSupportOpen(true)}
         onOpenServices={() => setIsServicesOpen(true)}
@@ -383,7 +434,15 @@ export default function App() {
 
       {/* Main Content Body */}
       <main className="flex-grow">
-        {!currentUser ? (
+        {activeTab === 'direct_store' ? (
+          <DirectStoreScreen
+            currentUser={currentUser}
+            onOpenLogin={() => setActiveTab('login')}
+            onNavigateToRequest={() => setActiveTab('new_request')}
+            onNavigateToProjectStatus={() => setActiveTab('project_status')}
+            externalOpenCartTrigger={isStoreCartOpen}
+          />
+        ) : !currentUser ? (
           /* Authentication Required Wall for New Request and Project Status */
           <AuthScreen
             initialMode={activeTab === 'register' ? 'register' : 'login'}
@@ -415,6 +474,7 @@ export default function App() {
             onOpenSupport={() => setIsSupportOpen(true)}
             onNavigateToAdvisorPortal={() => setActiveTab('advisor_portal')}
             onUpdateProject={handleUpdateProjectRequest}
+            onNavigateToStore={() => setActiveTab('direct_store')}
           />
         ) : activeTab === 'advisor_portal' ? (
           <AdvisorEvaluationScreen
@@ -441,6 +501,7 @@ export default function App() {
             onSubmitRequest={handleSubmitRequest}
             isProcessingAI={isProcessingAI}
             currentUser={currentUser}
+            onNavigateToStore={() => setActiveTab('direct_store')}
           />
         ) : (
           currentRequest && (

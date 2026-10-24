@@ -966,14 +966,27 @@ export const ProjectStatusScreen: React.FC<ProjectStatusScreenProps> = ({
 
             {/* Locked Phase Alert Banner */}
             {!lockInfo.canAddProducts && (
-              <div className="p-3.5 rounded-xl bg-[#fcf3e0] border border-[#d1c6ab] flex items-start gap-3 text-xs text-[#4d4632]">
-                <Lock className="w-4 h-4 text-[#725c00] shrink-0 mt-0.5" />
-                <div>
-                  <strong className="text-[#1f1b10] block font-bold">
-                    Formulación de productos bloqueada ({lockInfo.badgeLabel}):
-                  </strong>
-                  <span>{lockInfo.reason}</span>
+              <div className="p-4 rounded-xl bg-[#fcf3e0] border border-[#d1c6ab] flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-[#4d4632]">
+                <div className="flex items-start gap-3">
+                  <Lock className="w-4 h-4 text-[#725c00] shrink-0 mt-0.5" />
+                  <div>
+                    <strong className="text-[#1f1b10] block font-bold">
+                      Formulación de productos bloqueada ({lockInfo.badgeLabel}):
+                    </strong>
+                    <span>{lockInfo.reason}</span>
+                  </div>
                 </div>
+                {onNavigateToStore && (
+                  <button
+                    type="button"
+                    onClick={onNavigateToStore}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#ffd100] hover:bg-[#ffc800] text-[#0d4788] font-black text-xs shrink-0 shadow-2xs transition-all hover:scale-[1.02] cursor-pointer self-start sm:self-center"
+                    id="btn-goto-store-from-status"
+                  >
+                    <ShoppingBag className="w-3.5 h-3.5" />
+                    <span>Comprar en Tienda Directa</span>
+                  </button>
+                )}
               </div>
             )}
 
