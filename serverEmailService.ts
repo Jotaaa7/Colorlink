@@ -1,5 +1,8 @@
 import nodemailer from 'nodemailer';
 import { Resend } from 'resend';
+import dotenv from 'dotenv';
+
+dotenv.config({ override: true });
 
 export interface EmailResult {
   success: boolean;
@@ -8,6 +11,7 @@ export interface EmailResult {
   messageId?: string;
   previewUrl?: string;
   error?: string;
+  diagnostic?: string;
 }
 
 export interface UserEmailData {
@@ -18,6 +22,15 @@ export interface UserEmailData {
   documentNumber?: string;
   phone?: string;
   city?: string;
+  companyName?: string;
+}
+
+export interface SupportEmailData {
+  fullName: string;
+  email: string;
+  phone?: string;
+  subject: string;
+  message: string;
   companyName?: string;
 }
 
@@ -66,15 +79,65 @@ export interface ProjectEmailData {
   comments?: string;
 }
 
+export interface EmailLogEntry {
+  id: string;
+  timestamp: string;
+  to: string;
+  subject: string;
+  provider: 'Resend' | 'SMTP' | 'Simulator';
+  success: boolean;
+  messageId?: string;
+  error?: string;
+  diagnostic?: string;
+}
+
+const emailLogs: EmailLogEntry[] = [];
+
+export function getRecentEmailLogs(): EmailLogEntry[] {
+  return [...emailLogs].reverse().slice(0, 10);
+}
+
 /**
- * Initializes the Resend client if RESEND_API_KEY is present
+ * Checks Resend configuration status and detects placeholder dummy keys
+ */
+export function getResendStatus() {
+  dotenv.config({ override: true });
+  const rawKey = (process.env.RESEND_API_KEY || '').trim();
+  const isDummy =
+    rawKey === '' ||
+    rawKey === 're_123456789_abcdefg' ||
+    rawKey.startsWith('re_1234') ||
+    rawKey === 'your_resend_api_key' ||
+    rawKey.length < 25;
+  const isConfigured = !isDummy && rawKey.startsWith('re_');
+  const sender = getSenderAddress(true);
+  const hasCustomDomain = Boolean(
+    process.env.RESEND_FROM && !process.env.RESEND_FROM.includes('onboarding@resend.dev')
+  );
+
+  return {
+    isConfigured,
+    isDummy,
+    rawKeyMasked: rawKey ? `${rawKey.slice(0, 6)}...${rawKey.slice(-4)}` : 'No configurada',
+    sender,
+    hasCustomDomain,
+    note: isDummy
+      ? "La variable RESEND_API_KEY contiene un valor de prueba/placeholder ('re_123456789_abcdefg'). Para envíos reales, ingresa una API Key real de https://resend.com/api-keys en el archivo .env."
+      : isConfigured && !hasCustomDomain
+      ? "Usando 'onboarding@resend.dev' de Resend. En el plan gratuito, Resend solo entrega correos a la dirección del propietario de la cuenta (ej. tu correo de registro en Resend). Para enviar a cualquier cliente, verifica tu propio dominio en https://resend.com/domains y configúralo en RESEND_FROM."
+      : "Configuración de Resend activa con dominio personalizado.",
+  };
+}
+
+/**
+ * Initializes the Resend client if a valid RESEND_API_KEY is present
  */
 function getResendClient(): Resend | null {
-  const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey || apiKey.trim() === '') {
+  const status = getResendStatus();
+  if (!status.isConfigured) {
     return null;
   }
-  return new Resend(apiKey.trim());
+  return new Resend(process.env.RESEND_API_KEY!.trim());
 }
 
 /**
@@ -108,8 +171,8 @@ function getEmailTransporter() {
 function getSenderAddress(isResend: boolean = false): string {
   if (isResend) {
     // If user provided a verified domain in RESEND_FROM, use it:
-    if (process.env.RESEND_FROM) {
-      return process.env.RESEND_FROM;
+    if (process.env.RESEND_FROM && process.env.RESEND_FROM.trim() !== '') {
+      return process.env.RESEND_FROM.trim();
     }
     // Default Resend testing sender allowed without custom domain verification:
     return 'ColorLink Pintuco <onboarding@resend.dev>';
@@ -141,10 +204,19 @@ async function sendOrSimulateEmail(options: {
   html: string;
   text?: string;
 }): Promise<EmailResult> {
-  const resend = getResendClient();
+  const status = getResendStatus();
+  const logEntry: EmailLogEntry = {
+    id: `log-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+    timestamp: new Date().toISOString(),
+    to: options.to,
+    subject: options.subject,
+    provider: 'Simulator',
+    success: false,
+  };
 
   // 1. PRIMARY: Resend Integration
-  if (resend) {
+  if (status.isConfigured) {
+    const resend = new Resend(process.env.RESEND_API_KEY!.trim());
     const fromAddress = getSenderAddress(true);
     try {
       const response = await resend.emails.send({
@@ -157,15 +229,33 @@ async function sendOrSimulateEmail(options: {
 
       if (response.error) {
         console.error(`❌ [RESEND ERROR] No se pudo enviar a ${options.to}:`, response.error.message);
+        let diagnostic = response.error.message;
+        if (response.error.message.includes('only send testing emails')) {
+          diagnostic = `Restricción de prueba Resend: En el plan gratuito con remitente 'onboarding@resend.dev', solo puedes enviar correos a la dirección con la que te registraste en Resend. Para enviar a clientes (${options.to}), debes verificar un dominio en https://resend.com/domains y agregarlo a RESEND_FROM.`;
+        } else if (response.error.message.includes('API key')) {
+          diagnostic = `Clave de API de Resend rechazada: ${response.error.message}. Por favor verifica tu clave en https://resend.com/api-keys.`;
+        }
+
+        logEntry.provider = 'Resend';
+        logEntry.success = false;
+        logEntry.error = response.error.message;
+        logEntry.diagnostic = diagnostic;
+        emailLogs.push(logEntry);
+
         return {
           success: false,
           simulated: false,
           provider: 'Resend',
-          error: response.error.message,
+          error: diagnostic,
         };
       }
 
       console.log(`✅ [RESEND EMAIL SENT] Correo enviado a ${options.to} con ID: ${response.data?.id}`);
+      logEntry.provider = 'Resend';
+      logEntry.success = true;
+      logEntry.messageId = response.data?.id;
+      emailLogs.push(logEntry);
+
       return {
         success: true,
         simulated: false,
@@ -174,6 +264,11 @@ async function sendOrSimulateEmail(options: {
       };
     } catch (err: any) {
       console.error(`❌ [RESEND EXCEPTION] Error inesperado enviando a ${options.to}:`, err.message);
+      logEntry.provider = 'Resend';
+      logEntry.success = false;
+      logEntry.error = err.message;
+      emailLogs.push(logEntry);
+
       return {
         success: false,
         simulated: false,
@@ -196,6 +291,11 @@ async function sendOrSimulateEmail(options: {
       });
 
       console.log(`✅ [SMTP EMAIL SENT] Enviado a ${options.to} con ID: ${info.messageId}`);
+      logEntry.provider = 'SMTP';
+      logEntry.success = true;
+      logEntry.messageId = info.messageId;
+      emailLogs.push(logEntry);
+
       return {
         success: true,
         simulated: false,
@@ -204,6 +304,11 @@ async function sendOrSimulateEmail(options: {
       };
     } catch (err: any) {
       console.error(`❌ [SMTP ERROR] Error enviando correo a ${options.to}:`, err.message);
+      logEntry.provider = 'SMTP';
+      logEntry.success = false;
+      logEntry.error = err.message;
+      emailLogs.push(logEntry);
+
       return {
         success: false,
         simulated: false,
@@ -213,20 +318,29 @@ async function sendOrSimulateEmail(options: {
     }
   }
 
-  // 3. FALLBACK: Simulation Mode (No RESEND_API_KEY or SMTP configured)
+  // 3. FALLBACK: Simulation Mode (No valid RESEND_API_KEY or SMTP configured)
   console.log('\n========================================================');
   console.log('📨 [EMAIL SIMULATOR - ColorLink Pintuco Notification]');
   console.log(`Para: ${options.to}`);
   console.log(`Asunto: ${options.subject}`);
-  console.log(`Estado: Modo Simulación (Configura RESEND_API_KEY en Render para envíos reales con Resend)`);
+  console.log(`Estado: Modo Simulación (${status.isDummy ? 'RESEND_API_KEY es un placeholder' : 'RESEND_API_KEY no configurada'})`);
   console.log('========================================================\n');
+
+  logEntry.provider = 'Simulator';
+  logEntry.success = true;
+  logEntry.messageId = `sim-${Date.now()}`;
+  logEntry.diagnostic = status.note;
+  emailLogs.push(logEntry);
+
   return {
     success: true,
     simulated: true,
     provider: 'Simulator',
-    messageId: `sim-${Date.now()}`,
+    messageId: logEntry.messageId,
+    error: status.isDummy ? status.note : undefined,
   };
 }
+
 
 /**
  * 1. Welcome Email upon registration
@@ -652,3 +766,54 @@ export async function sendProjectStatusEmail(data: ProjectEmailData): Promise<Em
     html,
   });
 }
+
+/**
+ * 4. Support Ticket Notification Email
+ */
+export async function sendSupportTicketEmail(ticket: SupportEmailData): Promise<EmailResult> {
+  const subject = `Confirmación de Soporte Técnico ColorLink Pintuco: ${ticket.subject}`;
+  const html = `
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>${subject}</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; margin: 0; padding: 0; background-color: #f4f6f8; color: #1f2937; }
+    .container { max-width: 600px; margin: 20px auto; background: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.06); border: 1px solid #e5e7eb; }
+    .header { background: linear-gradient(135deg, #0d4788 0%, #173663 100%); padding: 32px 24px; text-align: center; }
+    .badge { display: inline-block; background-color: #ffd100; color: #0d4788; font-weight: 800; font-size: 11px; padding: 4px 12px; border-radius: 9999px; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 12px; }
+    .brand-title { color: #ffffff; font-size: 24px; font-weight: 900; margin: 0; }
+    .content { padding: 30px 28px; line-height: 1.6; }
+    .footer { background-color: #f1f5f9; padding: 24px; text-align: center; font-size: 12px; color: #64748b; border-top: 1px solid #e2e8f0; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <span class="badge">Soporte Técnico Especializado</span>
+      <h1 class="brand-title">Solicitud Radicada con Éxito</h1>
+    </div>
+    <div class="content">
+      <p style="font-size: 16px; color: #0f172a; margin-top: 0;">Hola <strong>${ticket.fullName}</strong>,</p>
+      <p style="color: #475569; font-size: 14px;">Hemos recibido tu consulta técnica en el sistema ColorLink de Pintuco. Uno de nuestros ingenieros especialistas la está evaluando para darte respuesta inmediata.</p>
+      <div style="background:#f8fafc; border-left:4px solid #ffd100; padding:16px; margin:16px 0; border-radius:8px; border:1px solid #e2e8f0; border-left-width:4px;">
+        <p style="margin:0 0 6px 0; font-weight:bold; color:#0d4788;">Asunto: ${ticket.subject}</p>
+        <p style="margin:0; font-size:13px; color:#475569;">"${ticket.message}"</p>
+      </div>
+      <p style="font-size:13px; color:#64748b; text-align: center;">Línea de atención técnica gratuita: 01 8000 111 247 | WhatsApp: +57 310 746 8899</p>
+    </div>
+    <div class="footer">
+      <p style="margin:0; font-weight:bold; color:#0d4788;">Pintuco Colombia S.A.S. • ColorLink Pro</p>
+    </div>
+  </div>
+</body>
+</html>`;
+
+  return sendOrSimulateEmail({
+    to: ticket.email,
+    subject,
+    html,
+  });
+}
+

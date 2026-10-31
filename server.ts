@@ -7,9 +7,12 @@ import {
   sendWelcomeEmail,
   sendInvoiceEmail,
   sendProjectStatusEmail,
+  sendSupportTicketEmail,
+  getResendStatus,
+  getRecentEmailLogs,
 } from "./serverEmailService";
 
-dotenv.config();
+dotenv.config({ override: true });
 
 const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
@@ -605,26 +608,65 @@ app.post("/api/notifications/project-status", async (req, res) => {
   }
 });
 
+// Notifications: Get Status & Diagnostic Info (Resend & SMTP)
+app.get("/api/notifications/status", (req, res) => {
+  const status = getResendStatus();
+  return res.json({
+    success: true,
+    resend: status,
+    smtpConfigured: Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS),
+    recentLogs: getRecentEmailLogs(),
+  });
+});
+
 // Notifications: Test Email Configuration (Resend & SMTP Diagnostic Endpoint)
 app.post("/api/test/email", async (req, res) => {
   const { toEmail } = req.body || {};
-  const targetEmail = toEmail || process.env.SMTP_USER || "test@colorlink.com";
+  const targetEmail = toEmail || process.env.RESEND_TEST_EMAIL || "Stivengamer1803@gmail.com";
+  const resendStatus = getResendStatus();
 
   try {
     const result = await sendWelcomeEmail({
-      fullName: "Prueba Técnica de Notificaciones",
-      email: targetEmail,
+      fullName: "Prueba Técnica ColorLink Pintuco",
+      email: targetEmail.trim(),
       role: "Especialista Técnico Pintuco",
       city: "Medellín / Bogotá",
     });
+
     return res.json({
-      success: true,
+      success: result.success,
       result,
-      resendConfigured: Boolean(process.env.RESEND_API_KEY && process.env.RESEND_API_KEY.trim() !== ""),
+      resendStatus,
       smtpConfigured: Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS),
       providerUsed: result.provider || (result.simulated ? "Simulator" : "Unknown"),
+      message: result.success
+        ? `Correo de prueba enviado exitosamente a ${targetEmail} vía ${result.provider}`
+        : result.error || "No se pudo entregar el correo",
     });
   } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Notifications: Support Ticket Email Endpoint
+app.post("/api/support/ticket", async (req, res) => {
+  const { fullName, email, phone, subject, message } = req.body || {};
+  if (!email || !subject) {
+    return res.status(400).json({ success: false, error: "Correo y asunto son requeridos" });
+  }
+
+  try {
+    const result = await sendSupportTicketEmail({
+      fullName: fullName || "Cliente ColorLink",
+      email: email.trim(),
+      phone: phone || "",
+      subject: subject.trim(),
+      message: message || "Sin mensaje adicional",
+    });
+
+    return res.json({ success: true, result });
+  } catch (err: any) {
+    console.error("Error sending support ticket email:", err.message);
     return res.status(500).json({ success: false, error: err.message });
   }
 });

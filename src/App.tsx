@@ -653,6 +653,7 @@ export default function App() {
       <SupportModal
         isOpen={isSupportOpen}
         onClose={() => setIsSupportOpen(false)}
+        currentUser={currentUser}
       />
     </div>
   );
