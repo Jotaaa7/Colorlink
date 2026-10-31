@@ -3,6 +3,11 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
+import {
+  sendWelcomeEmail,
+  sendInvoiceEmail,
+  sendProjectStatusEmail,
+} from "./serverEmailService";
 
 dotenv.config();
 
@@ -288,16 +293,37 @@ app.get("/api/db/orders", async (req, res) => {
   }
 });
 
-// Render PostgreSQL: Insert Direct Order
+// Render PostgreSQL: Insert Direct Order with Email Invoice
 app.post("/api/db/orders", async (req, res) => {
   const pool = getDbPool();
-  if (!pool) {
-    return res.json({ success: false, fallback: true, message: "No DATABASE_URL configured" });
-  }
-
   const o = req.body;
   if (!o || !o.id || !o.sapOrderCode) {
     return res.status(400).json({ success: false, error: "Datos de orden incompletos" });
+  }
+
+  // Trigger invoice email asynchronously regardless of DB mode
+  if (o.customerEmail) {
+    sendInvoiceEmail({
+      id: o.id,
+      sapOrderCode: o.sapOrderCode,
+      customerName: o.customerName || "Cliente Pintuco",
+      customerEmail: o.customerEmail,
+      customerPhone: o.customerPhone || "",
+      deliveryAddress: o.deliveryAddress || "Dirección registrada",
+      deliveryCity: o.deliveryCity || "Colombia",
+      paymentMethod: o.paymentMethod || "PSE",
+      subtotal: Number(o.subtotal) || 0,
+      discount: Number(o.discount) || 0,
+      iva: Number(o.iva) || 0,
+      shipping: Number(o.shipping) || 0,
+      total: Number(o.total) || 0,
+      status: o.status || "Pagado y Confirmado",
+      items: o.items || [],
+    }).catch((err) => console.error("Error enviando factura por correo:", err));
+  }
+
+  if (!pool) {
+    return res.json({ success: true, fallback: true, id: o.id, sapOrderCode: o.sapOrderCode });
   }
 
   try {
@@ -335,7 +361,7 @@ app.post("/api/db/orders", async (req, res) => {
   }
 });
 
-// Render PostgreSQL: Register User
+// Render PostgreSQL: Register User with Welcome Email
 app.post("/api/auth/register", async (req, res) => {
   const pool = getDbPool();
   const {
@@ -356,6 +382,18 @@ app.post("/api/auth/register", async (req, res) => {
   }
 
   const userId = id || `USR-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`;
+
+  // Trigger welcome email asynchronously
+  sendWelcomeEmail({
+    fullName: fullName.trim(),
+    email: email.trim().toLowerCase(),
+    role: role || "Constructora / Arquitecto",
+    documentType: documentType || "NIT",
+    documentNumber: documentNumber || "",
+    phone: phone || "",
+    city: city || "Bogotá",
+    companyName: companyName || undefined,
+  }).catch((err) => console.error("Error enviando correo de bienvenida:", err));
 
   if (!pool) {
     // Local / fallback mode when no DATABASE_URL configured
@@ -429,6 +467,59 @@ app.post("/api/auth/register", async (req, res) => {
     });
   } catch (err: any) {
     console.error("Error registering user in Render PostgreSQL:", err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Notifications: Send Project Status Update Email
+app.post("/api/notifications/project-status", async (req, res) => {
+  const { project, previousStatus, newStatus } = req.body || {};
+  if (!project || !project.clientEmail) {
+    return res.status(400).json({ success: false, error: "Proyecto o correo de cliente no especificado" });
+  }
+
+  try {
+    const result = await sendProjectStatusEmail({
+      id: project.id,
+      clientName: project.clientName || "Cliente Pintuco",
+      clientEmail: project.clientEmail,
+      surfaceType: project.surfaceType,
+      city: project.city,
+      status: newStatus || project.status,
+      previousStatus: previousStatus,
+      assignedAdvisor: project.assignedAdvisor,
+      areaM2: project.areaM2,
+      trackingNumber: project.trackingNumber,
+      assignedCarrier: project.assignedCarrier,
+      comments: project.comments,
+    });
+    return res.json({ success: true, result });
+  } catch (err: any) {
+    console.error("Error enviando notificación de estado de proyecto:", err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Notifications: Test Email Configuration (Resend & SMTP Diagnostic Endpoint)
+app.post("/api/test/email", async (req, res) => {
+  const { toEmail } = req.body || {};
+  const targetEmail = toEmail || process.env.SMTP_USER || "test@colorlink.com";
+
+  try {
+    const result = await sendWelcomeEmail({
+      fullName: "Prueba Técnica de Notificaciones",
+      email: targetEmail,
+      role: "Especialista Técnico Pintuco",
+      city: "Medellín / Bogotá",
+    });
+    return res.json({
+      success: true,
+      result,
+      resendConfigured: Boolean(process.env.RESEND_API_KEY && process.env.RESEND_API_KEY.trim() !== ""),
+      smtpConfigured: Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS),
+      providerUsed: result.provider || (result.simulated ? "Simulator" : "Unknown"),
+    });
+  } catch (err: any) {
     return res.status(500).json({ success: false, error: err.message });
   }
 });

@@ -210,3 +210,31 @@ export async function fetchUsersFromDb(): Promise<any[] | null> {
   }
 }
 
+/**
+ * Triggers an email notification for a project status change
+ */
+export async function sendProjectStatusNotification(
+  project: ProjectRequest,
+  newStatus: string,
+  previousStatus?: string
+): Promise<boolean> {
+  try {
+    const res = await fetch('/api/notifications/project-status', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        project,
+        newStatus,
+        previousStatus,
+      }),
+    });
+    if (!res.ok) return false;
+    const data = await res.json();
+    return !!data.success;
+  } catch (err) {
+    console.warn('[EmailNotification] Error enviando notificación de estado:', err);
+    return false;
+  }
+}
+
+

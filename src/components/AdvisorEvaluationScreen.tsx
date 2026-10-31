@@ -8,6 +8,7 @@ import { AdvisorInventoryView } from './advisor/AdvisorInventoryView';
 import { AdvisorHistoryView } from './advisor/AdvisorHistoryView';
 import { AdvisorStatusModal, ValidProjectStatus } from './advisor/AdvisorStatusModal';
 import { getProjectPhaseLockInfo } from '../lib/projectStatusRules';
+import { sendProjectStatusNotification } from '../services/renderDbService';
 import {
   Lock,
   ShieldAlert,
@@ -207,10 +208,13 @@ export const AdvisorEvaluationScreen: React.FC<AdvisorEvaluationScreenProps> = (
         : {}),
       ...(newStatus === 'Completada' ? { completedAt: new Date().toISOString() } : {}),
     };
+    const previousStatus = activeRequest.status;
     setActiveRequest(updatedRequest);
     if (onUpdateProject) {
       onUpdateProject(updatedRequest);
     }
+    // Asynchronously dispatch email notification to the customer
+    sendProjectStatusNotification(updatedRequest, newStatus, previousStatus);
     triggerToast(`Estado del proyecto ${projectCode} actualizado a: "${newStatus}" exitosamente`);
   };
 

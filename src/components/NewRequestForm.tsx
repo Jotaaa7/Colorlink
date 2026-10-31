@@ -41,47 +41,43 @@ export const NewRequestForm: React.FC<NewRequestFormProps> = ({
   currentUser,
   onNavigateToStore,
 }) => {
-  // Form State
-  const [fullName, setFullName] = useState(currentUser?.fullName || 'Constructora Andina SAS');
+  // Form State - Clean initial state so real users enter their own data
+  const [fullName, setFullName] = useState(currentUser?.fullName || '');
   const [documentType, setDocumentType] = useState<DocumentType | string>(
-    currentUser?.documentType || 'NIT'
+    currentUser?.documentType || 'Cédula de Ciudadanía'
   );
   const [documentNumber, setDocumentNumber] = useState(
-    currentUser?.documentNumber || '900.584.210-7'
+    currentUser?.documentNumber || ''
   );
-  const [email, setEmail] = useState(currentUser?.email || 'proyectos@andinasas.com');
-  const [phone, setPhone] = useState(currentUser?.phone || '+57 (310) 845-9920');
+  const [email, setEmail] = useState(currentUser?.email || '');
+  const [phone, setPhone] = useState(currentUser?.phone || '');
 
-  const [city, setCity] = useState(currentUser?.city || 'Bogotá');
-  const [address, setAddress] = useState('Carrera 7 # 116-50 Edificio Teleport');
-  const [areaM2, setAreaM2] = useState<number | string>(120);
-  const [requiredDate, setRequiredDate] = useState('2026-09-10');
+  const [city, setCity] = useState(currentUser?.city || '');
+  const [address, setAddress] = useState('');
+  const [areaM2, setAreaM2] = useState<number | string>('');
+  const [requiredDate, setRequiredDate] = useState('');
   const [surfaceType, setSurfaceType] = useState<SurfaceType>('Pared');
-  const [condition, setCondition] = useState<SurfaceCondition>('Para Repintar');
+  const [condition, setCondition] = useState<SurfaceCondition>('Nuevo');
   const [environment, setEnvironment] = useState<EnvironmentType>('interior');
 
-  // Update contact fields when user changes
+  // Update contact fields when user changes or logs in
   useEffect(() => {
     if (currentUser) {
-      setFullName(currentUser.fullName);
-      setDocumentType(currentUser.documentType);
-      setDocumentNumber(currentUser.documentNumber);
-      setEmail(currentUser.email);
-      setPhone(currentUser.phone);
+      if (currentUser.fullName) setFullName(currentUser.fullName);
+      if (currentUser.documentType) setDocumentType(currentUser.documentType);
+      if (currentUser.documentNumber) setDocumentNumber(currentUser.documentNumber);
+      if (currentUser.email) setEmail(currentUser.email);
+      if (currentUser.phone) setPhone(currentUser.phone);
       if (currentUser.city) setCity(currentUser.city);
     }
   }, [currentUser]);
 
-  const [photoUrl, setPhotoUrl] = useState<string>(
-    'https://lh3.googleusercontent.com/aida/AEtjO1WYVBglUAjzMQtZxYOsMdBjzwkZIyh5ECgrs4r2o5nrdJtqVrRcpYmbIorQtalWVZwjSl0yHAb4hTEAlgcBihBPPjuCyYNKPx9Z-bVDWzKHX6fZQSY5OvkaOagOPrntsnoM7b19rmxuER032hy2pOycXmWFJMkbN6NKOTnmVToJYFPKtHonVCPEgnciraOXNImokOm0dAQ6Q_u9lRVUdPaM_8Hi91DlzmL7jhQ6LWtdlSAqmipExtH0N04k'
-  );
+  const [photoUrl, setPhotoUrl] = useState<string>('');
   const [photoBase64, setPhotoBase64] = useState<string>('');
-  const [photoName, setPhotoName] = useState<string>('espacio_interior_sala.jpg');
+  const [photoName, setPhotoName] = useState<string>('');
 
-  const [additionalDetails, setAdditionalDetails] = useState(
-    'Buscamos un acabado mate lavable de alta durabilidad en tono neutro cálido para oficinas ejecutivas. Se requiere asesoría técnica para sellado de microfisuras.'
-  );
-  const [colorTone, setColorTone] = useState('Arena Cálido (Colección Pintuco 2026)');
+  const [additionalDetails, setAdditionalDetails] = useState('');
+  const [colorTone, setColorTone] = useState('');
   const [selectedColorHex, setSelectedColorHex] = useState('#E28468');
   const [selectedColorName, setSelectedColorName] = useState('Arena Cálido');
   const [selectedColorCode, setSelectedColorCode] = useState('PT-248-A');
@@ -165,13 +161,17 @@ export const NewRequestForm: React.FC<NewRequestFormProps> = ({
         {/* Left Column: Context Image (Matches screenshot) */}
         <div className="w-full lg:w-1/3 shrink-0">
           <div className="sticky top-24 rounded-2xl overflow-hidden shadow-md border border-[#ebe2cf] bg-white group">
-            <div className="relative h-[480px] sm:h-[580px] w-full overflow-hidden">
-              <img
-                src={photoUrl}
-                alt="Transforma tus espacios"
-                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent flex flex-col justify-end p-6 sm:p-8">
+            <div className="relative h-[480px] sm:h-[580px] w-full overflow-hidden bg-gradient-to-br from-[#1f1b10] via-[#3a2f18] to-[#121008]">
+              {photoUrl ? (
+                <img
+                  src={photoUrl}
+                  alt="Registro fotográfico del proyecto"
+                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
+                />
+              ) : (
+                <div className="w-full h-full opacity-40 bg-[radial-gradient(#ffd100_1px,transparent_1px)] [background-size:16px_16px]"></div>
+              )}
+              <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/40 to-transparent flex flex-col justify-end p-6 sm:p-8">
                 <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#ffd100] text-[#1f1b10] text-xs font-bold w-fit mb-3 shadow-xs">
                   <Sparkles className="w-3.5 h-3.5" />
                   Ecosistema ColorLink

@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { ProjectRequest, QuotationItem } from '../types';
+import { ProjectRequest, QuotationItem, UserProfile } from '../types';
 import { ColorSelectorModal, ColorSelectionResult } from './ColorSelectorModal';
 import { AddProductModal } from './AddProductModal';
 import { getProjectPhaseLockInfo } from '../lib/projectStatusRules';
+import { sendProjectStatusNotification } from '../services/renderDbService';
 import {
   Calendar,
   Clock,
@@ -39,6 +40,7 @@ import {
 
 interface ProjectStatusScreenProps {
   request: ProjectRequest | null;
+  currentUser?: UserProfile | null;
   onNavigateToRequest: () => void;
   onNavigateToEcosystem: () => void;
   onOpenSupport: () => void;
@@ -49,6 +51,7 @@ interface ProjectStatusScreenProps {
 
 export const ProjectStatusScreen: React.FC<ProjectStatusScreenProps> = ({
   request,
+  currentUser,
   onNavigateToRequest,
   onNavigateToEcosystem,
   onOpenSupport,
@@ -331,8 +334,21 @@ export const ProjectStatusScreen: React.FC<ProjectStatusScreenProps> = ({
       break;
   }
 
-  // Handle advancement of the project lifecycle along the route
+  // Check if current user is an authorized technical advisor or staff
+  const isAdvisor = Boolean(
+    currentUser?.role &&
+      (currentUser.role.includes('Técnico') ||
+        currentUser.role.includes('Asesor') ||
+        currentUser.role.includes('Administrador') ||
+        currentUser.role.includes('Pintuco'))
+  );
+
+  // Handle advancement of the project lifecycle along the route - RESTRICTED TO ADVISORS
   const handleAdvanceStatus = (newStatus: ProjectRequest['status']) => {
+    if (!isAdvisor) {
+      console.warn('Acción bloqueada: solo los asesores técnicos de Pintuco pueden avanzar el estado del proyecto.');
+      return;
+    }
     if (!request) return;
     const now = new Date();
     const updated: ProjectRequest = {
@@ -360,10 +376,54 @@ export const ProjectStatusScreen: React.FC<ProjectStatusScreenProps> = ({
           : request.completedAt,
     };
 
+    const previousStatus = currentStatus;
     if (onUpdateProject) {
       onUpdateProject(updated);
     }
+    // Asynchronously dispatch email notification to the customer
+    sendProjectStatusNotification(updated, newStatus, previousStatus);
   };
+
+  // If no project has been submitted by the real user yet, show a clean informative empty state
+  if (!request) {
+    return (
+      <div className="w-full max-w-4xl mx-auto px-4 md:px-8 py-16 text-center">
+        <div className="bg-white rounded-3xl p-8 sm:p-12 shadow-sm border border-[#ebe2cf] space-y-6">
+          <div className="w-20 h-20 rounded-2xl bg-[#ffd100]/30 text-[#725c00] flex items-center justify-center mx-auto shadow-inner">
+            <FileText className="w-10 h-10" />
+          </div>
+          <div className="space-y-2 max-w-lg mx-auto">
+            <h2 className="text-2xl sm:text-3xl font-black text-[#1f1b10]">
+              No tienes proyectos registrados aún
+            </h2>
+            <p className="text-sm text-[#7f765f] leading-relaxed">
+              Hola, {currentUser?.fullName || 'Cliente'}. Aún no has radicado una solicitud técnica de proyecto. Crea tu primera solicitud con las características de tu superficie para que nuestros asesores e IA formulen tu solución técnica, o visita nuestra tienda de compra directa.
+            </p>
+          </div>
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
+            <button
+              type="button"
+              onClick={onNavigateToRequest}
+              className="w-full sm:w-auto px-8 py-3.5 rounded-full bg-[#ffd100] hover:bg-[#ffc800] text-[#0d4788] text-sm font-black shadow-md flex items-center justify-center gap-2 cursor-pointer transition-all"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Crear Nueva Solicitud de Proyecto</span>
+            </button>
+            {onNavigateToStore && (
+              <button
+                type="button"
+                onClick={onNavigateToStore}
+                className="w-full sm:w-auto px-8 py-3.5 rounded-full bg-white hover:bg-[#f6eddb] text-[#1f1b10] text-sm font-bold border border-[#d1c6ab] flex items-center justify-center gap-2 cursor-pointer transition-all"
+              >
+                <ShoppingBag className="w-4 h-4 text-[#725c00]" />
+                <span>Comprar en Tienda Directa</span>
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="w-full max-w-7xl mx-auto px-4 md:px-8 py-6 md:py-10">
@@ -497,97 +557,146 @@ export const ProjectStatusScreen: React.FC<ProjectStatusScreenProps> = ({
           </div>
 
           <div className="flex flex-wrap items-center gap-3 shrink-0">
-            {currentStatus === 'Cotizada' && (
-              <button
-                type="button"
-                onClick={() => handleAdvanceStatus('Inventario Asignado')}
-                className="px-6 py-3.5 rounded-xl bg-[#ffd100] hover:bg-[#ffc800] text-[#0d4788] text-sm font-black shadow-md hover:shadow-lg transition-all flex items-center gap-2 cursor-pointer"
-                id="btn-advance-to-production"
-              >
-                <CheckCircle2 className="w-5 h-5 text-[#0d4788]" />
-                <span>Aprobar Cotización y Reservar Stock</span>
-              </button>
-            )}
+            {/* If user is an Advisor, allow advancing phases */}
+            {isAdvisor ? (
+              <>
+                {currentStatus === 'Cotizada' && (
+                  <button
+                    type="button"
+                    onClick={() => handleAdvanceStatus('Inventario Asignado')}
+                    className="px-6 py-3.5 rounded-xl bg-[#ffd100] hover:bg-[#ffc800] text-[#0d4788] text-sm font-black shadow-md hover:shadow-lg transition-all flex items-center gap-2 cursor-pointer"
+                    id="btn-advance-to-production"
+                  >
+                    <CheckCircle2 className="w-5 h-5 text-[#0d4788]" />
+                    <span>Aprobar Cotización y Reservar Stock</span>
+                  </button>
+                )}
 
-            {currentStatus === 'Inventario Asignado' && (
-              <button
-                type="button"
-                onClick={() => handleAdvanceStatus('En Producción')}
-                className="px-6 py-3.5 rounded-xl bg-[#2f5ea1] hover:bg-[#254b80] text-white text-sm font-black shadow-md hover:shadow-lg transition-all flex items-center gap-2 cursor-pointer"
-                id="btn-advance-to-tinting"
-              >
-                <FlaskConical className="w-5 h-5 text-[#ffd100]" />
-                <span>Iniciar Tinturado & Fabricación</span>
-              </button>
-            )}
+                {currentStatus === 'Inventario Asignado' && (
+                  <button
+                    type="button"
+                    onClick={() => handleAdvanceStatus('En Producción')}
+                    className="px-6 py-3.5 rounded-xl bg-[#2f5ea1] hover:bg-[#254b80] text-white text-sm font-black shadow-md hover:shadow-lg transition-all flex items-center gap-2 cursor-pointer"
+                    id="btn-advance-to-tinting"
+                  >
+                    <FlaskConical className="w-5 h-5 text-[#ffd100]" />
+                    <span>Iniciar Tinturado & Fabricación</span>
+                  </button>
+                )}
 
-            {currentStatus === 'En Producción' && (
-              <button
-                type="button"
-                onClick={() => handleAdvanceStatus('Aprobada QA')}
-                className="px-6 py-3.5 rounded-xl bg-[#00875a] hover:bg-[#006644] text-white text-sm font-black shadow-md hover:shadow-lg transition-all flex items-center gap-2 cursor-pointer"
-                id="btn-advance-to-qa"
-              >
-                <ShieldCheck className="w-5 h-5 text-white" />
-                <span>Certificar Calidad Lote (QA ISO 9001)</span>
-              </button>
-            )}
+                {currentStatus === 'En Producción' && (
+                  <button
+                    type="button"
+                    onClick={() => handleAdvanceStatus('Aprobada QA')}
+                    className="px-6 py-3.5 rounded-xl bg-[#00875a] hover:bg-[#006644] text-white text-sm font-black shadow-md hover:shadow-lg transition-all flex items-center gap-2 cursor-pointer"
+                    id="btn-advance-to-qa"
+                  >
+                    <ShieldCheck className="w-5 h-5 text-white" />
+                    <span>Certificar Calidad Lote (QA ISO 9001)</span>
+                  </button>
+                )}
 
-            {currentStatus === 'Aprobada QA' && (
-              <button
-                type="button"
-                onClick={() => handleAdvanceStatus('Completada')}
-                className="px-6 py-3.5 rounded-xl bg-[#ffd100] hover:bg-[#ffc800] text-[#0d4788] text-sm font-black shadow-md hover:shadow-lg transition-all flex items-center gap-2 cursor-pointer"
-                id="btn-advance-to-delivery"
-              >
-                <Truck className="w-5 h-5 text-[#0d4788]" />
-                <span>Despachar y Confirmar Entrega en Obra</span>
-              </button>
-            )}
+                {currentStatus === 'Aprobada QA' && (
+                  <button
+                    type="button"
+                    onClick={() => handleAdvanceStatus('Completada')}
+                    className="px-6 py-3.5 rounded-xl bg-[#ffd100] hover:bg-[#ffc800] text-[#0d4788] text-sm font-black shadow-md hover:shadow-lg transition-all flex items-center gap-2 cursor-pointer"
+                    id="btn-advance-to-delivery"
+                  >
+                    <Truck className="w-5 h-5 text-[#0d4788]" />
+                    <span>Despachar y Confirmar Entrega en Obra</span>
+                  </button>
+                )}
 
-            {currentStatus === 'Completada' && (
-              <button
-                type="button"
-                onClick={() => setShowCertificateModal(true)}
-                className="px-6 py-3.5 rounded-xl bg-[#2f5ea1] hover:bg-[#254b80] text-white text-sm font-black shadow-md transition-all flex items-center gap-2 cursor-pointer"
-                id="btn-view-certificate"
-              >
-                <ShieldCheck className="w-5 h-5 text-[#ffd100]" />
-                <span>Ver Certificado de Garantía 5 Años</span>
-              </button>
+                {currentStatus === 'Completada' && (
+                  <button
+                    type="button"
+                    onClick={() => setShowCertificateModal(true)}
+                    className="px-6 py-3.5 rounded-xl bg-[#2f5ea1] hover:bg-[#254b80] text-white text-sm font-black shadow-md transition-all flex items-center gap-2 cursor-pointer"
+                    id="btn-view-certificate"
+                  >
+                    <ShieldCheck className="w-5 h-5 text-[#ffd100]" />
+                    <span>Ver Certificado de Garantía 5 Años</span>
+                  </button>
+                )}
+              </>
+            ) : (
+              /* Client View: Read-only status with client service actions */
+              <div className="flex flex-wrap items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={onOpenSupport}
+                  className="px-5 py-3 rounded-xl bg-white hover:bg-[#f6eddb] text-[#1f1b10] text-xs font-bold border border-[#d1c6ab] transition-all flex items-center gap-2 cursor-pointer shadow-2xs"
+                >
+                  <Headphones className="w-4 h-4 text-[#725c00]" />
+                  <span>Consultar Asesor Técnico</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShowFichaTecnicaModal(true)}
+                  className="px-5 py-3 rounded-xl bg-[#ffd100] hover:bg-[#ffc800] text-[#0d4788] text-xs font-black transition-all flex items-center gap-2 cursor-pointer shadow-xs"
+                >
+                  <FileText className="w-4 h-4 text-[#0d4788]" />
+                  <span>Ficha Técnica y Cotización</span>
+                </button>
+
+                {currentStatus === 'Completada' && (
+                  <button
+                    type="button"
+                    onClick={() => setShowCertificateModal(true)}
+                    className="px-5 py-3 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold transition-all flex items-center gap-2 cursor-pointer shadow-xs"
+                  >
+                    <ShieldCheck className="w-4 h-4 text-[#ffd100]" />
+                    <span>Certificado de Garantía</span>
+                  </button>
+                )}
+              </div>
             )}
           </div>
         </div>
 
-        {/* Phase Simulator Controls for Full Route Testing */}
-        <div className="mt-5 pt-4 border-t border-[#d1c6ab]/50 flex flex-wrap items-center justify-between gap-3 text-xs">
-          <span className="font-bold text-[#725c00] flex items-center gap-1.5">
-            <Edit3 className="w-3.5 h-3.5" />
-            <span>Simulador de Estados de la Ruta:</span>
-          </span>
-          <div className="flex flex-wrap items-center gap-1.5">
-            {[
-              { label: '1. Registrada', status: 'Registrada' as const },
-              { label: '2. Diagnóstico IA', status: 'Analizada por IA' as const },
-              { label: '3. Cotizada & Color', status: 'Cotizada' as const },
-              { label: '4. En Producción / QA', status: 'En Producción' as const },
-              { label: '5. Entregado en Obra', status: 'Completada' as const },
-            ].map((st) => (
-              <button
-                key={st.status}
-                type="button"
-                onClick={() => handleAdvanceStatus(st.status)}
-                className={`px-3 py-1 rounded-lg font-bold transition-all cursor-pointer ${
-                  currentStatus === st.status
-                    ? 'bg-[#1f1b10] text-[#ffd100] shadow-xs'
-                    : 'bg-white hover:bg-[#f6eddb] text-[#4d4632] border border-[#d1c6ab]'
-                }`}
-              >
-                {st.label}
-              </button>
-            ))}
+        {/* Phase Simulator Controls - VISIBLE ONLY FOR ADVISORS */}
+        {isAdvisor ? (
+          <div className="mt-5 pt-4 border-t border-[#d1c6ab]/50 flex flex-wrap items-center justify-between gap-3 text-xs">
+            <span className="font-bold text-[#725c00] flex items-center gap-1.5">
+              <ShieldCheck className="w-3.5 h-3.5 text-[#0d4788]" />
+              <span>Control de Asesor Técnico (Simulador de Ruta):</span>
+            </span>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {[
+                { label: '1. Registrada', status: 'Registrada' as const },
+                { label: '2. Diagnóstico IA', status: 'Analizada por IA' as const },
+                { label: '3. Cotizada & Color', status: 'Cotizada' as const },
+                { label: '4. En Producción / QA', status: 'En Producción' as const },
+                { label: '5. Entregado en Obra', status: 'Completada' as const },
+              ].map((st) => (
+                <button
+                  key={st.status}
+                  type="button"
+                  onClick={() => handleAdvanceStatus(st.status)}
+                  className={`px-3 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                    currentStatus === st.status
+                      ? 'bg-[#1f1b10] text-[#ffd100] shadow-xs'
+                      : 'bg-white hover:bg-[#f6eddb] text-[#4d4632] border border-[#d1c6ab]'
+                  }`}
+                >
+                  {st.label}
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="mt-5 pt-4 border-t border-[#d1c6ab]/50 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-[#7f765f]">
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>El avance y certificación de cada fase técnica es gestionado exclusivamente por los asesores técnicos de Pintuco.</span>
+            </div>
+            <span className="font-mono text-[11px] text-[#4d4632]">
+              Asesor: {request?.assignedAdvisor || 'Ingeniería & Asesoría Técnica Pintuco'}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Timeline / Stepper Section - DYNAMIC 5 PHASES */}

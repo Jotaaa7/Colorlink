@@ -79,9 +79,9 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
 }) => {
   const [mode, setMode] = useState<'login' | 'register'>(initialMode);
 
-  // Login Form States
-  const [loginEmail, setLoginEmail] = useState('proyectos@andinasas.com');
-  const [loginPassword, setLoginPassword] = useState('ColorLink2026*');
+  // Login Form States - Clean initial state so real users enter their credentials
+  const [loginEmail, setLoginEmail] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
   const [loginError, setLoginError] = useState('');

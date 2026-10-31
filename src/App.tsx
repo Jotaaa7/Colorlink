@@ -26,6 +26,16 @@ import {
   saveUserToDb,
 } from './services/renderDbService';
 
+function isAdvisorRole(role?: string): boolean {
+  if (!role) return false;
+  return (
+    role.includes('Técnico') ||
+    role.includes('Asesor') ||
+    role.includes('Administrador') ||
+    role.includes('Pintuco')
+  );
+}
+
 export default function App() {
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => {
     try {
@@ -50,7 +60,25 @@ export default function App() {
   const [supabaseConnected, setSupabaseConnected] = useState<boolean | null>(null);
   const [renderDbConnected, setRenderDbConnected] = useState<boolean | null>(null);
 
-  const [currentRequest, setCurrentRequest] = useState<ProjectRequest | null>(INITIAL_DEMO_REQUEST);
+  // Clean request state per user - never mix demo projects with real clients
+  const [currentRequest, setCurrentRequest] = useState<ProjectRequest | null>(() => {
+    try {
+      const savedUser = localStorage.getItem('colorlink_user');
+      if (savedUser) {
+        const u = JSON.parse(savedUser);
+        if (isAdvisorRole(u.role)) {
+          return INITIAL_DEMO_REQUEST;
+        }
+        const userSavedReq = localStorage.getItem(`colorlink_user_request_${u.email}`);
+        if (userSavedReq) {
+          return JSON.parse(userSavedReq);
+        }
+      }
+    } catch {
+      // ignore
+    }
+    return null;
+  });
   const [isProcessingAI, setIsProcessingAI] = useState(false);
   const [isServicesOpen, setIsServicesOpen] = useState(false);
   const [isSupportOpen, setIsSupportOpen] = useState(false);
@@ -110,7 +138,23 @@ export default function App() {
         if (dbStatus.connected) {
           const pgProjects = await fetchProjectsFromDb();
           if (pgProjects && pgProjects.length > 0) {
-            setCurrentRequest(pgProjects[0]);
+            // Only set project if user is logged in
+            const savedUserStr = localStorage.getItem('colorlink_user');
+            if (savedUserStr) {
+              const u = JSON.parse(savedUserStr);
+              if (isAdvisorRole(u.role)) {
+                setCurrentRequest(pgProjects[0]);
+              } else {
+                const userProject = pgProjects.find(
+                  (p: any) =>
+                    p.client?.email?.toLowerCase() === u.email?.toLowerCase() ||
+                    p.clientEmail?.toLowerCase() === u.email?.toLowerCase()
+                );
+                if (userProject) {
+                  setCurrentRequest(userProject);
+                }
+              }
+            }
           }
         }
       } catch (err) {
@@ -126,7 +170,20 @@ export default function App() {
           if (status.connected) {
             const remoteRequests = await getRemoteProjectRequests();
             if (remoteRequests && remoteRequests.length > 0) {
-              setCurrentRequest(remoteRequests[0]);
+              const savedUserStr = localStorage.getItem('colorlink_user');
+              if (savedUserStr) {
+                const u = JSON.parse(savedUserStr);
+                if (isAdvisorRole(u.role)) {
+                  setCurrentRequest(remoteRequests[0]);
+                } else {
+                  const userReq = remoteRequests.find(
+                    (p: any) => p.client?.email?.toLowerCase() === u.email?.toLowerCase()
+                  );
+                  if (userReq) {
+                    setCurrentRequest(userReq);
+                  }
+                }
+              }
             }
           }
         } catch (err) {
@@ -144,6 +201,13 @@ export default function App() {
     setCurrentUser(user);
     try {
       localStorage.setItem('colorlink_user', JSON.stringify(user));
+      // Load user's isolated project request
+      if (isAdvisorRole(user.role)) {
+        setCurrentRequest(INITIAL_DEMO_REQUEST);
+      } else {
+        const userSavedReq = localStorage.getItem(`colorlink_user_request_${user.email}`);
+        setCurrentRequest(userSavedReq ? JSON.parse(userSavedReq) : null);
+      }
     } catch {
       // ignore
     }
@@ -160,6 +224,7 @@ export default function App() {
 
   const handleLogout = () => {
     setCurrentUser(null);
+    setCurrentRequest(null);
     try {
       localStorage.removeItem('colorlink_user');
     } catch {
@@ -172,6 +237,7 @@ export default function App() {
     const advisorUser =
       DEMO_USERS.find((u) => u.role === 'Especialista Técnico Pintuco') || DEMO_USERS[1];
     setCurrentUser(advisorUser);
+    setCurrentRequest(INITIAL_DEMO_REQUEST);
     try {
       localStorage.setItem('colorlink_user', JSON.stringify(advisorUser));
     } catch {
@@ -418,6 +484,16 @@ export default function App() {
       };
 
       setCurrentRequest(completedRequest);
+      try {
+        if (currentUser?.email) {
+          localStorage.setItem(
+            `colorlink_user_request_${currentUser.email}`,
+            JSON.stringify(completedRequest)
+          );
+        }
+      } catch {
+        // ignore
+      }
       // Persist to Supabase database asynchronously
       saveRemoteProjectRequest(completedRequest).catch((err) =>
         console.warn('Supabase request save notice:', err)
@@ -439,6 +515,16 @@ export default function App() {
 
   const handleUpdateProjectRequest = (updatedRequest: ProjectRequest) => {
     setCurrentRequest(updatedRequest);
+    try {
+      if (currentUser?.email) {
+        localStorage.setItem(
+          `colorlink_user_request_${currentUser.email}`,
+          JSON.stringify(updatedRequest)
+        );
+      }
+    } catch {
+      // ignore
+    }
     saveRemoteProjectRequest(updatedRequest).catch((err) =>
       console.warn('Supabase update notice:', err)
     );
@@ -504,6 +590,7 @@ export default function App() {
         ) : activeTab === 'project_status' ? (
           <ProjectStatusScreen
             request={currentRequest}
+            currentUser={currentUser}
             onNavigateToRequest={() => setActiveTab('new_request')}
             onNavigateToEcosystem={() => setActiveTab('ecosystem_hub')}
             onOpenSupport={() => setIsSupportOpen(true)}
