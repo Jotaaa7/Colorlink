@@ -35,6 +35,7 @@ import {
   User,
 } from 'lucide-react';
 import { ColorSelectorModal, ColorSelectionResult } from './ColorSelectorModal';
+import { saveOrderToDb, fetchOrdersFromDb } from '../services/renderDbService';
 
 interface DirectStoreScreenProps {
   currentUser: UserProfile | null;
@@ -128,6 +129,25 @@ export const DirectStoreScreen: React.FC<DirectStoreScreenProps> = ({
       console.warn('Could not save orders in localStorage', e);
     }
   }, [ordersHistory]);
+
+  // Load orders from Render PostgreSQL if connected
+  useEffect(() => {
+    async function syncRemoteOrders() {
+      try {
+        const remote = await fetchOrdersFromDb();
+        if (remote && remote.length > 0) {
+          setOrdersHistory((prev) => {
+            const existingIds = new Set(prev.map((o) => o.orderId));
+            const newFromDb = remote.filter((o) => !existingIds.has(o.orderId));
+            return [...newFromDb, ...prev];
+          });
+        }
+      } catch (e) {
+        console.warn('Notice syncing orders from PostgreSQL:', e);
+      }
+    }
+    syncRemoteOrders();
+  }, []);
 
   const triggerToast = (msg: string) => {
     setNotificationToast(msg);
@@ -366,6 +386,10 @@ export const DirectStoreScreen: React.FC<DirectStoreScreenProps> = ({
 
       setOrdersHistory((prev) => [newOrder, ...prev]);
       setConfirmedOrder(newOrder);
+      // Persist to Render PostgreSQL database
+      saveOrderToDb(newOrder).catch((err) =>
+        console.warn('PostgreSQL order save notice:', err)
+      );
       setCartItems([]);
       setIsProcessingCheckout(false);
       setIsCheckoutOpen(false);

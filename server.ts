@@ -7,7 +7,7 @@ import dotenv from "dotenv";
 dotenv.config();
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
@@ -28,9 +28,539 @@ function getGeminiClient(): GoogleGenAI | null {
   });
 }
 
+// PostgreSQL Connection Pool (Render PostgreSQL or any standard Postgres URI)
+let dbPool: any = null;
+
+function getDbPool() {
+  if (dbPool) return dbPool;
+  const connectionString = process.env.DATABASE_URL;
+  if (!connectionString) {
+    return null;
+  }
+
+  // Import pg dynamically or use standard Pool
+  const { Pool } = require("pg");
+  const isSslNeeded = connectionString.includes("render.com") || process.env.NODE_ENV === "production" || connectionString.includes("sslmode=require");
+  dbPool = new Pool({
+    connectionString,
+    ssl: isSslNeeded ? { rejectUnauthorized: false } : undefined,
+  });
+  return dbPool;
+}
+
+// Auto-initialize Render PostgreSQL schema on startup
+async function initDatabaseTables() {
+  const pool = getDbPool();
+  if (!pool) {
+    console.log("ℹ️ [Database] No DATABASE_URL detectada. Usando almacenamiento local/memoria.");
+    return;
+  }
+
+  try {
+    const client = await pool.connect();
+    try {
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS project_requests (
+          id VARCHAR(100) PRIMARY KEY,
+          client_name VARCHAR(255) NOT NULL,
+          client_email VARCHAR(255),
+          client_phone VARCHAR(50),
+          client_type VARCHAR(50),
+          surface_type VARCHAR(100),
+          environment VARCHAR(50),
+          condition VARCHAR(100),
+          area_m2 NUMERIC,
+          city VARCHAR(100),
+          comments TEXT,
+          status VARCHAR(50) NOT NULL DEFAULT 'Registrada',
+          assigned_advisor VARCHAR(255),
+          ai_diagnosis JSONB,
+          formulation JSONB,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+          updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+
+        CREATE TABLE IF NOT EXISTS direct_orders (
+          id VARCHAR(100) PRIMARY KEY,
+          sap_order_code VARCHAR(100) NOT NULL UNIQUE,
+          customer_name VARCHAR(255) NOT NULL,
+          customer_email VARCHAR(255) NOT NULL,
+          customer_phone VARCHAR(50),
+          delivery_address TEXT NOT NULL,
+          delivery_city VARCHAR(100) NOT NULL,
+          payment_method VARCHAR(50) NOT NULL,
+          subtotal NUMERIC NOT NULL,
+          discount NUMERIC NOT NULL DEFAULT 0,
+          iva NUMERIC NOT NULL DEFAULT 0,
+          shipping NUMERIC NOT NULL DEFAULT 0,
+          total NUMERIC NOT NULL,
+          status VARCHAR(50) NOT NULL DEFAULT 'Pagado y Confirmado',
+          items JSONB NOT NULL,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+
+        CREATE TABLE IF NOT EXISTS users (
+          id VARCHAR(100) PRIMARY KEY,
+          full_name VARCHAR(255) NOT NULL,
+          email VARCHAR(255) NOT NULL UNIQUE,
+          password_hash TEXT,
+          role VARCHAR(100) NOT NULL DEFAULT 'Cliente Particular',
+          document_type VARCHAR(50),
+          document_number VARCHAR(100),
+          phone VARCHAR(50),
+          city VARCHAR(100),
+          company_name VARCHAR(255),
+          avatar_url TEXT,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+          updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+      `);
+      console.log("✅ [Render PostgreSQL] Tablas 'users', 'project_requests' y 'direct_orders' listas y verificadas.");
+    } finally {
+      client.release();
+    }
+  } catch (err: any) {
+    console.error("⚠️ [Render PostgreSQL] Error al inicializar tablas:", err.message);
+  }
+}
+
+// Render PostgreSQL Status Endpoint
+app.get("/api/db/status", async (req, res) => {
+  const pool = getDbPool();
+  if (!pool) {
+    return res.json({
+      configured: false,
+      connected: false,
+      provider: "Render PostgreSQL",
+      message: "DATABASE_URL no configurada en las variables de entorno de Render",
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  try {
+    const result = await pool.query("SELECT NOW() as current_time, version() as version;");
+    return res.json({
+      configured: true,
+      connected: true,
+      provider: "Render PostgreSQL",
+      serverTime: result.rows[0]?.current_time,
+      version: result.rows[0]?.version?.split(" ")?.slice(0, 2)?.join(" "),
+      message: "Conectado exitosamente a la base de datos PostgreSQL de Render",
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      configured: true,
+      connected: false,
+      provider: "Render PostgreSQL",
+      error: err.message,
+      timestamp: new Date().toISOString(),
+    });
+  }
+});
+
+// Render PostgreSQL: Read & Sync Project Requests
+app.get("/api/db/projects", async (req, res) => {
+  const pool = getDbPool();
+  if (!pool) {
+    return res.json({ success: false, fallback: true, projects: [] });
+  }
+
+  try {
+    const result = await pool.query("SELECT * FROM project_requests ORDER BY created_at DESC;");
+    const formatted = result.rows.map((row: any) => ({
+      id: row.id,
+      clientName: row.client_name,
+      clientEmail: row.client_email,
+      clientPhone: row.client_phone,
+      clientType: row.client_type,
+      surfaceType: row.surface_type,
+      environment: row.environment,
+      condition: row.condition,
+      areaM2: Number(row.area_m2),
+      city: row.city,
+      comments: row.comments,
+      status: row.status,
+      assignedAdvisor: row.assigned_advisor,
+      aiDiagnosis: row.ai_diagnosis,
+      formulation: row.formulation,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    }));
+    return res.json({ success: true, projects: formatted });
+  } catch (err: any) {
+    console.error("Error fetching projects from PostgreSQL:", err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Render PostgreSQL: Upsert Project Request
+app.post("/api/db/projects", async (req, res) => {
+  const pool = getDbPool();
+  if (!pool) {
+    return res.json({ success: false, fallback: true, message: "No DATABASE_URL configured" });
+  }
+
+  const p = req.body;
+  if (!p || !p.id || !p.clientName) {
+    return res.status(400).json({ success: false, error: "Datos de proyecto incompletos" });
+  }
+
+  try {
+    await pool.query(
+      `INSERT INTO project_requests (
+        id, client_name, client_email, client_phone, client_type,
+        surface_type, environment, condition, area_m2, city,
+        comments, status, assigned_advisor, ai_diagnosis, formulation, updated_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW())
+      ON CONFLICT (id) DO UPDATE SET
+        client_name = EXCLUDED.client_name,
+        client_email = EXCLUDED.client_email,
+        client_phone = EXCLUDED.client_phone,
+        client_type = EXCLUDED.client_type,
+        surface_type = EXCLUDED.surface_type,
+        environment = EXCLUDED.environment,
+        condition = EXCLUDED.condition,
+        area_m2 = EXCLUDED.area_m2,
+        city = EXCLUDED.city,
+        comments = EXCLUDED.comments,
+        status = EXCLUDED.status,
+        assigned_advisor = EXCLUDED.assigned_advisor,
+        ai_diagnosis = EXCLUDED.ai_diagnosis,
+        formulation = EXCLUDED.formulation,
+        updated_at = NOW();`,
+      [
+        p.id,
+        p.clientName,
+        p.clientEmail || null,
+        p.clientPhone || null,
+        p.clientType || 'Particular',
+        p.surfaceType || 'Pared',
+        p.environment || 'Interior',
+        p.condition || 'Nuevo',
+        p.areaM2 || 0,
+        p.city || 'Bogotá',
+        p.comments || null,
+        p.status || 'Registrada',
+        p.assignedAdvisor || null,
+        JSON.stringify(p.aiDiagnosis || null),
+        JSON.stringify(p.formulation || null),
+      ]
+    );
+    return res.json({ success: true, id: p.id });
+  } catch (err: any) {
+    console.error("Error upserting project into PostgreSQL:", err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Render PostgreSQL: Read & Sync Direct Orders
+app.get("/api/db/orders", async (req, res) => {
+  const pool = getDbPool();
+  if (!pool) {
+    return res.json({ success: false, fallback: true, orders: [] });
+  }
+
+  try {
+    const result = await pool.query("SELECT * FROM direct_orders ORDER BY created_at DESC;");
+    const formatted = result.rows.map((row: any) => ({
+      id: row.id,
+      sapOrderCode: row.sap_order_code,
+      customerName: row.customer_name,
+      customerEmail: row.customer_email,
+      customerPhone: row.customer_phone,
+      deliveryAddress: row.delivery_address,
+      deliveryCity: row.delivery_city,
+      paymentMethod: row.payment_method,
+      subtotal: Number(row.subtotal),
+      discount: Number(row.discount),
+      iva: Number(row.iva),
+      shipping: Number(row.shipping),
+      total: Number(row.total),
+      status: row.status,
+      items: row.items,
+      createdAt: row.created_at,
+    }));
+    return res.json({ success: true, orders: formatted });
+  } catch (err: any) {
+    console.error("Error fetching orders from PostgreSQL:", err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Render PostgreSQL: Insert Direct Order
+app.post("/api/db/orders", async (req, res) => {
+  const pool = getDbPool();
+  if (!pool) {
+    return res.json({ success: false, fallback: true, message: "No DATABASE_URL configured" });
+  }
+
+  const o = req.body;
+  if (!o || !o.id || !o.sapOrderCode) {
+    return res.status(400).json({ success: false, error: "Datos de orden incompletos" });
+  }
+
+  try {
+    await pool.query(
+      `INSERT INTO direct_orders (
+        id, sap_order_code, customer_name, customer_email, customer_phone,
+        delivery_address, delivery_city, payment_method, subtotal, discount,
+        iva, shipping, total, status, items
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+      ON CONFLICT (id) DO UPDATE SET
+        status = EXCLUDED.status,
+        customer_phone = EXCLUDED.customer_phone;`,
+      [
+        o.id,
+        o.sapOrderCode,
+        o.customerName || "Cliente Pintuco",
+        o.customerEmail || "",
+        o.customerPhone || "",
+        o.deliveryAddress || "",
+        o.deliveryCity || "",
+        o.paymentMethod || "PSE",
+        o.subtotal || 0,
+        o.discount || 0,
+        o.iva || 0,
+        o.shipping || 0,
+        o.total || 0,
+        o.status || "Pagado y Confirmado",
+        JSON.stringify(o.items || []),
+      ]
+    );
+    return res.json({ success: true, id: o.id, sapOrderCode: o.sapOrderCode });
+  } catch (err: any) {
+    console.error("Error inserting order into PostgreSQL:", err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Render PostgreSQL: Register User
+app.post("/api/auth/register", async (req, res) => {
+  const pool = getDbPool();
+  const {
+    id,
+    fullName,
+    email,
+    password,
+    role,
+    documentType,
+    documentNumber,
+    phone,
+    city,
+    companyName,
+  } = req.body || {};
+
+  if (!fullName || !email || !password) {
+    return res.status(400).json({ success: false, error: "Nombre, correo y contraseña son obligatorios" });
+  }
+
+  const userId = id || `USR-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`;
+
+  if (!pool) {
+    // Local / fallback mode when no DATABASE_URL configured
+    return res.json({
+      success: true,
+      fallback: true,
+      user: {
+        id: userId,
+        fullName: fullName.trim(),
+        email: email.trim().toLowerCase(),
+        role: role || "Constructora / Arquitecto",
+        documentType: documentType || "NIT",
+        documentNumber: documentNumber || "",
+        phone: phone || "",
+        city: city || "Bogotá",
+        companyName: companyName || null,
+        createdAt: new Date().toISOString().split("T")[0],
+      },
+    });
+  }
+
+  try {
+    // Check if email already registered
+    const existing = await pool.query("SELECT id, email FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1;", [
+      email.trim(),
+    ]);
+
+    if (existing.rows && existing.rows.length > 0) {
+      return res.status(409).json({
+        success: false,
+        error: "El correo electrónico ya se encuentra registrado en ColorLink Pintuco.",
+      });
+    }
+
+    const query = `
+      INSERT INTO users (
+        id, full_name, email, password_hash, role, document_type,
+        document_number, phone, city, company_name, created_at, updated_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW())
+      RETURNING id, full_name, email, role, document_type, document_number, phone, city, company_name, created_at;
+    `;
+
+    const result = await pool.query(query, [
+      userId,
+      fullName.trim(),
+      email.trim().toLowerCase(),
+      password, // Stored credential
+      role || "Constructora / Arquitecto",
+      documentType || "NIT",
+      documentNumber || "",
+      phone || "",
+      city || "Bogotá",
+      companyName || null,
+    ]);
+
+    const created = result.rows[0];
+    return res.json({
+      success: true,
+      user: {
+        id: created.id,
+        fullName: created.full_name,
+        email: created.email,
+        role: created.role,
+        documentType: created.document_type,
+        documentNumber: created.document_number,
+        phone: created.phone,
+        city: created.city,
+        companyName: created.company_name,
+        createdAt: created.created_at,
+      },
+    });
+  } catch (err: any) {
+    console.error("Error registering user in Render PostgreSQL:", err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Render PostgreSQL: Login User
+app.post("/api/auth/login", async (req, res) => {
+  const pool = getDbPool();
+  const { email, password } = req.body || {};
+
+  if (!email || !password) {
+    return res.status(400).json({ success: false, error: "Correo y contraseña son requeridos" });
+  }
+
+  if (!pool) {
+    return res.json({ success: false, fallback: true, message: "No DATABASE_URL configured" });
+  }
+
+  try {
+    const result = await pool.query(
+      "SELECT id, full_name, email, password_hash, role, document_type, document_number, phone, city, company_name, avatar_url, created_at FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1;",
+      [email.trim()]
+    );
+
+    if (!result.rows || result.rows.length === 0) {
+      return res.status(404).json({ success: false, error: "Usuario no encontrado" });
+    }
+
+    const row = result.rows[0];
+    if (row.password_hash && row.password_hash !== password) {
+      return res.status(401).json({ success: false, error: "Contraseña incorrecta" });
+    }
+
+    return res.json({
+      success: true,
+      user: {
+        id: row.id,
+        fullName: row.full_name,
+        email: row.email,
+        role: row.role,
+        documentType: row.document_type,
+        documentNumber: row.document_number,
+        phone: row.phone,
+        city: row.city,
+        companyName: row.company_name,
+        avatarUrl: row.avatar_url,
+        createdAt: row.created_at,
+      },
+    });
+  } catch (err: any) {
+    console.error("Error logging in with PostgreSQL:", err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Render PostgreSQL: Upsert User Profile
+app.post("/api/db/users", async (req, res) => {
+  const pool = getDbPool();
+  if (!pool) {
+    return res.json({ success: false, fallback: true });
+  }
+
+  const u = req.body;
+  if (!u || !u.email) {
+    return res.status(400).json({ success: false, error: "Datos de usuario incompletos" });
+  }
+
+  const userId = u.id || `USR-${Date.now()}`;
+
+  try {
+    await pool.query(
+      `INSERT INTO users (
+        id, full_name, email, role, document_type, document_number, phone, city, company_name, updated_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+      ON CONFLICT (id) DO UPDATE SET
+        full_name = EXCLUDED.full_name,
+        role = EXCLUDED.role,
+        phone = EXCLUDED.phone,
+        city = EXCLUDED.city,
+        company_name = EXCLUDED.company_name,
+        updated_at = NOW();`,
+      [
+        userId,
+        u.fullName || "Usuario Pintuco",
+        u.email.toLowerCase(),
+        u.role || "Cliente Particular",
+        u.documentType || "Cédula de Ciudadanía",
+        u.documentNumber || "",
+        u.phone || "",
+        u.city || "Bogotá",
+        u.companyName || null,
+      ]
+    );
+    return res.json({ success: true, id: userId });
+  } catch (err: any) {
+    console.error("Error upserting user in PostgreSQL:", err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Render PostgreSQL: Get All Users (Admin / Registry)
+app.get("/api/db/users", async (req, res) => {
+  const pool = getDbPool();
+  if (!pool) {
+    return res.json({ success: false, fallback: true, users: [] });
+  }
+
+  try {
+    const result = await pool.query(
+      "SELECT id, full_name, email, role, document_type, document_number, phone, city, company_name, created_at FROM users ORDER BY created_at DESC;"
+    );
+    const users = result.rows.map((row: any) => ({
+      id: row.id,
+      fullName: row.full_name,
+      email: row.email,
+      role: row.role,
+      documentType: row.document_type,
+      documentNumber: row.document_number,
+      phone: row.phone,
+      city: row.city,
+      companyName: row.company_name,
+      createdAt: row.created_at,
+    }));
+    return res.json({ success: true, users });
+  } catch (err: any) {
+    console.error("Error fetching users from PostgreSQL:", err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // Health check
 app.get("/api/health", (req, res) => {
-  res.json({ status: "ok", service: "ColorLink - Pintuco AI Intelligent Ecosystem" });
+  res.json({ status: "ok", service: "ColorLink - Pintuco AI Intelligent Ecosystem", database: dbPool ? "PostgreSQL Connected" : "Local Ready" });
 });
 
 // AI Diagnostic & Technical Formulation endpoint
@@ -293,6 +823,9 @@ async function startServer() {
       res.sendFile(path.join(distPath, "index.html"));
     });
   }
+
+  // Auto-initialize PostgreSQL tables if DATABASE_URL is configured
+  await initDatabaseTables();
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`ColorLink Server running on http://localhost:${PORT}`);

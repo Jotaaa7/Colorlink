@@ -25,6 +25,7 @@ interface HeaderProps {
   currentRequest: ProjectRequest | null;
   currentUser: UserProfile | null;
   supabaseConnected?: boolean | null;
+  renderDbConnected?: boolean | null;
   cartItemsCount?: number;
   onOpenCart?: () => void;
   onLogout: () => void;
@@ -38,6 +39,7 @@ export const Header: React.FC<HeaderProps> = ({
   currentRequest,
   currentUser,
   supabaseConnected,
+  renderDbConnected,
   cartItemsCount = 0,
   onOpenCart,
   onLogout,
@@ -196,22 +198,30 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* User Profile / Auth Actions & Soporte */}
         <div className="flex items-center gap-2 sm:gap-3">
-          {/* Supabase Database Connection Badge */}
+          {/* Database Connection Badge (Render PostgreSQL / Supabase) */}
           <div
             className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold border transition-colors ${
-              supabaseConnected
+              renderDbConnected || supabaseConnected
                 ? 'bg-[#e6f4ea] text-[#137333] border-[#ceead6]'
                 : 'bg-[#f6eddb] text-[#7f765f] border-[#ebe2cf]'
             }`}
             title={
-              supabaseConnected
+              renderDbConnected
+                ? 'Base de datos Render PostgreSQL conectada y sincronizada'
+                : supabaseConnected
                 ? 'Base de datos Supabase conectada y sincronizada'
-                : 'Conector Supabase preparado (agrega tus llaves en .env para persistencia en nube)'
+                : 'Conexión a base de datos lista (configura DATABASE_URL en Render)'
             }
           >
             <Database className="w-3.5 h-3.5" />
             <span className="w-1.5 h-1.5 rounded-full shrink-0 animate-pulse bg-current"></span>
-            <span>{supabaseConnected ? 'Supabase Conectado' : 'Supabase Listo'}</span>
+            <span>
+              {renderDbConnected
+                ? 'Render PostgreSQL'
+                : supabaseConnected
+                ? 'Supabase Conectado'
+                : 'Render DB Listo'}
+            </span>
           </div>
 
           {/* Direct Store Shopping Cart Button */}

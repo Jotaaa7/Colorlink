@@ -19,6 +19,12 @@ import {
   checkSupabaseConnection,
 } from './services/supabaseService';
 import { isSupabaseConfigured } from './lib/supabase';
+import {
+  checkRenderDbStatus,
+  fetchProjectsFromDb,
+  saveProjectToDb,
+  saveUserToDb,
+} from './services/renderDbService';
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => {
@@ -42,6 +48,7 @@ export default function App() {
   });
 
   const [supabaseConnected, setSupabaseConnected] = useState<boolean | null>(null);
+  const [renderDbConnected, setRenderDbConnected] = useState<boolean | null>(null);
 
   const [currentRequest, setCurrentRequest] = useState<ProjectRequest | null>(INITIAL_DEMO_REQUEST);
   const [isProcessingAI, setIsProcessingAI] = useState(false);
@@ -93,9 +100,25 @@ export default function App() {
     };
   }, []);
 
-  // Initialize Supabase and check live database connection
+  // Initialize and check database connections (Render PostgreSQL & Supabase)
   useEffect(() => {
-    async function initSupabase() {
+    async function initDatabases() {
+      // 1. Check Render PostgreSQL Backend API
+      try {
+        const dbStatus = await checkRenderDbStatus();
+        setRenderDbConnected(dbStatus.connected);
+        if (dbStatus.connected) {
+          const pgProjects = await fetchProjectsFromDb();
+          if (pgProjects && pgProjects.length > 0) {
+            setCurrentRequest(pgProjects[0]);
+          }
+        }
+      } catch (err) {
+        console.warn('Render PostgreSQL notice:', err);
+        setRenderDbConnected(false);
+      }
+
+      // 2. Check Supabase
       if (isSupabaseConfigured()) {
         try {
           const status = await checkSupabaseConnection();
@@ -114,7 +137,7 @@ export default function App() {
         setSupabaseConnected(false);
       }
     }
-    initSupabase();
+    initDatabases();
   }, []);
 
   const handleLoginSuccess = (user: UserProfile) => {
@@ -127,6 +150,10 @@ export default function App() {
     // Asynchronously upsert profile into Supabase
     saveRemoteUserProfile(user).catch((err) =>
       console.warn('Supabase profile save notice:', err)
+    );
+    // Asynchronously upsert profile into Render PostgreSQL
+    saveUserToDb(user).catch((err) =>
+      console.warn('Render DB user save notice:', err)
     );
     setActiveTab('new_request');
   };
@@ -395,6 +422,10 @@ export default function App() {
       saveRemoteProjectRequest(completedRequest).catch((err) =>
         console.warn('Supabase request save notice:', err)
       );
+      // Persist to Render PostgreSQL database asynchronously
+      saveProjectToDb(completedRequest).catch((err) =>
+        console.warn('Render DB request save notice:', err)
+      );
       setActiveTab('project_status');
     } catch (error) {
       console.error('Error submitting request:', error);
@@ -411,6 +442,9 @@ export default function App() {
     saveRemoteProjectRequest(updatedRequest).catch((err) =>
       console.warn('Supabase update notice:', err)
     );
+    saveProjectToDb(updatedRequest).catch((err) =>
+      console.warn('Render DB request update notice:', err)
+    );
   };
 
   return (
@@ -422,6 +456,7 @@ export default function App() {
         currentRequest={currentRequest}
         currentUser={currentUser}
         supabaseConnected={supabaseConnected}
+        renderDbConnected={renderDbConnected}
         cartItemsCount={cartItemsCount}
         onOpenCart={() => {
           setActiveTab('direct_store');

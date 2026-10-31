@@ -19,6 +19,7 @@ import {
   HelpCircle,
   AlertCircle,
 } from 'lucide-react';
+import { registerUserInDb, loginUserInDb } from '../services/renderDbService';
 
 interface AuthScreenProps {
   initialMode?: 'login' | 'register';
@@ -108,7 +109,10 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     onLoginSuccess(demoUser);
   };
 
-  const handleLoginSubmit = (e: React.FormEvent) => {
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [regSuccessMsg, setRegSuccessMsg] = useState('');
+
+  const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError('');
 
@@ -117,29 +121,86 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
       return;
     }
 
-    // Check if matches a demo user or create session user
-    const matched = DEMO_USERS.find(
-      (u) => u.email.toLowerCase() === loginEmail.trim().toLowerCase()
-    );
+    setIsSubmitting(true);
 
-    const loggedUser: UserProfile = matched || {
-      id: `USR-${Math.floor(1000 + Math.random() * 9000)}`,
-      fullName: loginEmail.split('@')[0].replace('.', ' ').toUpperCase(),
-      email: loginEmail.trim(),
-      role: 'Constructora / Arquitecto',
-      documentType: 'NIT',
-      documentNumber: '900.000.000-1',
-      phone: '+57 (300) 000-0000',
-      city: 'Bogotá',
-      createdAt: new Date().toISOString().split('T')[0],
-    };
+    try {
+      // 1. Try remote PostgreSQL login first
+      const res = await loginUserInDb(loginEmail.trim(), loginPassword);
+      if (res.success && res.user) {
+        onLoginSuccess(res.user);
+        setIsSubmitting(false);
+        return;
+      }
 
-    onLoginSuccess(loggedUser);
+      // If database explicitly said credentials are invalid
+      if (res.error && !res.fallback && res.error !== 'Usuario no encontrado') {
+        setLoginError(res.error);
+        setIsSubmitting(false);
+        return;
+      }
+
+      // 2. Check if matches preset demo accounts
+      const matched = DEMO_USERS.find(
+        (u) => u.email.toLowerCase() === loginEmail.trim().toLowerCase()
+      );
+      if (matched) {
+        onLoginSuccess(matched);
+        setIsSubmitting(false);
+        return;
+      }
+
+      // 3. Check local registered users list (localStorage fallback)
+      try {
+        const localList = JSON.parse(localStorage.getItem('colorlink_registered_users') || '[]');
+        const localUser = localList.find(
+          (u: any) => u.email?.toLowerCase() === loginEmail.trim().toLowerCase()
+        );
+        if (localUser) {
+          if (localUser.password && localUser.password !== loginPassword) {
+            setLoginError('Contraseña incorrecta');
+            setIsSubmitting(false);
+            return;
+          }
+          onLoginSuccess(localUser);
+          setIsSubmitting(false);
+          return;
+        }
+      } catch {
+        // ignore
+      }
+
+      // If user was not found anywhere and DB responded user not found
+      if (res.error === 'Usuario no encontrado') {
+        setLoginError('No encontramos una cuenta con este correo. ¿Deseas registrarte?');
+        setIsSubmitting(false);
+        return;
+      }
+
+      // Fallback session user if backend database is not yet provisioned
+      const loggedUser: UserProfile = {
+        id: `USR-${Math.floor(1000 + Math.random() * 9000)}`,
+        fullName: loginEmail.split('@')[0].replace('.', ' ').toUpperCase(),
+        email: loginEmail.trim(),
+        role: 'Constructora / Arquitecto',
+        documentType: 'NIT',
+        documentNumber: '900.000.000-1',
+        phone: '+57 (300) 000-0000',
+        city: 'Bogotá',
+        createdAt: new Date().toISOString().split('T')[0],
+      };
+
+      onLoginSuccess(loggedUser);
+    } catch (err: any) {
+      setLoginError(err.message || 'Error al iniciar sesión');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const handleRegisterSubmit = (e: React.FormEvent) => {
+  const handleRegisterSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setRegError('');
+    setRegSuccessMsg('');
 
     if (!regFullName.trim() || !regEmail.trim() || !regDocNum.trim()) {
       setRegError('Por favor completa todos los campos obligatorios');
@@ -161,20 +222,55 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
       return;
     }
 
-    const newUser: UserProfile = {
-      id: `USR-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`,
+    setIsSubmitting(true);
+
+    const generatedId = `USR-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
+    const userData = {
+      id: generatedId,
       fullName: regFullName.trim(),
       email: regEmail.trim(),
+      password: regPassword,
       role: regRole,
       documentType: regDocType,
       documentNumber: regDocNum.trim(),
       phone: regPhone.trim() || '+57 (300) 000-0000',
       city: regCity.trim() || 'Bogotá',
       companyName: regRole.includes('Constructora') ? regFullName : undefined,
-      createdAt: new Date().toISOString().split('T')[0],
     };
 
-    onLoginSuccess(newUser);
+    try {
+      // 1. Persist directly to Render PostgreSQL
+      const dbResponse = await registerUserInDb(userData);
+
+      if (!dbResponse.success) {
+        setRegError(dbResponse.error || 'Error al guardar usuario en la base de datos');
+        setIsSubmitting(false);
+        return;
+      }
+
+      const createdUser: UserProfile = dbResponse.user || {
+        ...userData,
+        createdAt: new Date().toISOString().split('T')[0],
+      };
+
+      // 2. Also keep a local cache in localStorage for instant offline access
+      try {
+        const localList = JSON.parse(localStorage.getItem('colorlink_registered_users') || '[]');
+        localList.push({ ...createdUser, password: regPassword });
+        localStorage.setItem('colorlink_registered_users', JSON.stringify(localList));
+      } catch {
+        // ignore
+      }
+
+      setRegSuccessMsg('¡Usuario registrado con éxito en la base de datos! Iniciando sesión...');
+      setTimeout(() => {
+        onLoginSuccess(createdUser);
+      }, 700);
+    } catch (err: any) {
+      console.error('Registration error:', err);
+      setRegError(err.message || 'Error de conexión al registrar usuario');
+      setIsSubmitting(false);
+    }
   };
 
   const handleForgotSubmit = (e: React.FormEvent) => {
@@ -413,11 +509,21 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
 
                   <button
                     type="submit"
-                    className="w-full bg-[#ffd100] hover:bg-[#ffc800] text-[#1f1b10] font-bold text-base py-3.5 px-6 rounded-full shadow-md hover:-translate-y-0.5 active:translate-y-0 transition-all flex items-center justify-center gap-2 cursor-pointer mt-4"
+                    disabled={isSubmitting}
+                    className="w-full bg-[#ffd100] hover:bg-[#ffc800] text-[#1f1b10] font-bold text-base py-3.5 px-6 rounded-full shadow-md hover:-translate-y-0.5 active:translate-y-0 transition-all flex items-center justify-center gap-2 cursor-pointer mt-4 disabled:opacity-50"
                     id="btn-submit-login"
                   >
-                    <span>Ingresar a ColorLink</span>
-                    <ArrowRight className="w-4 h-4" />
+                    {isSubmitting ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-[#1f1b10] border-t-transparent rounded-full animate-spin"></div>
+                        <span>Verificando credenciales...</span>
+                      </>
+                    ) : (
+                      <>
+                        <span>Ingresar a ColorLink</span>
+                        <ArrowRight className="w-4 h-4" />
+                      </>
+                    )}
                   </button>
                 </form>
 
@@ -597,6 +703,13 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                     </div>
                   )}
 
+                  {regSuccessMsg && (
+                    <div className="mb-6 p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-800 flex items-center gap-2">
+                      <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
+                      <span>{regSuccessMsg}</span>
+                    </div>
+                  )}
+
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                     <div className="md:col-span-2">
                       <label className="block mb-2 text-sm font-semibold text-[#1f1b10]" htmlFor="regFullName">
@@ -757,11 +870,21 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
 
                   <button
                     type="submit"
-                    className="w-full sm:w-auto bg-[#ffd100] hover:bg-[#ffc800] text-[#1f1b10] font-bold text-base px-9 py-4 rounded-full shadow-md hover:-translate-y-0.5 active:translate-y-0 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                    disabled={isSubmitting}
+                    className="w-full sm:w-auto bg-[#ffd100] hover:bg-[#ffc800] text-[#1f1b10] font-bold text-base px-9 py-4 rounded-full shadow-md hover:-translate-y-0.5 active:translate-y-0 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
                     id="btn-submit-register"
                   >
-                    <span>Crear Cuenta ColorLink</span>
-                    <ArrowRight className="w-4 h-4" />
+                    {isSubmitting ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-[#1f1b10] border-t-transparent rounded-full animate-spin"></div>
+                        <span>Guardando en Base de Datos...</span>
+                      </>
+                    ) : (
+                      <>
+                        <span>Crear Cuenta ColorLink</span>
+                        <ArrowRight className="w-4 h-4" />
+                      </>
+                    )}
                   </button>
                 </div>
               </form>
