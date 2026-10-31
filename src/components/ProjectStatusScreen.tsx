@@ -4,6 +4,7 @@ import { ColorSelectorModal, ColorSelectionResult } from './ColorSelectorModal';
 import { AddProductModal } from './AddProductModal';
 import { getProjectPhaseLockInfo } from '../lib/projectStatusRules';
 import { sendProjectStatusNotification } from '../services/renderDbService';
+import { APP_IMAGES } from '../assets/images';
 import {
   Calendar,
   Clock,
@@ -67,7 +68,7 @@ export const ProjectStatusScreen: React.FC<ProjectStatusScreenProps> = ({
       label: 'Inspección Digital de Superficie',
       url:
         request?.photoUrl ||
-        'https://lh3.googleusercontent.com/aida/AEtjO1XGulv6BFlNCMVJ-v9Vr6kAcMtzVmUpR20kPQTBrpA2R8HZ9CvuLlA2QwBBX_ihb-pTiv3t4AomJe72yWvfNl6HAO-m9_--tqsoCK9UD8RybLXwjwNZc0TyipvKqr_fViDF28Li-Lez-BBOYw51oOoPeam4O-_vILrAPTrxrFaBmqkdMlVcu8GWo3W5i0zSQozSDfymMslLw4Ms5R2JwY7w0fnYcG2v9js2V5O3AMBHKba7LDU-Zh9XSRRl',
+        APP_IMAGES.wallInspection,
       caption:
         request?.diagnosis?.diagnosticSummary ||
         'Evaluación técnica: Muros secos sin eflorescencia. Apto para sistema de recubrimientos Pintuco.',

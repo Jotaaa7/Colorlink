@@ -20,6 +20,7 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { registerUserInDb, loginUserInDb } from '../services/renderDbService';
+import { APP_IMAGES } from '../assets/images';
 
 interface AuthScreenProps {
   initialMode?: 'login' | 'register';
@@ -40,7 +41,7 @@ export const DEMO_USERS: UserProfile[] = [
     phone: '+57 (310) 845-9920',
     city: 'Bogotá',
     companyName: 'Constructora Andina SAS',
-    avatarUrl: 'https://images.unsplash.com/photo-1541888946425-d0fbb18086f6?w=150&auto=format&fit=crop&q=80',
+    avatarUrl: 'https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?w=150&auto=format&fit=crop&q=80',
     createdAt: '2026-01-15',
   },
   {
@@ -292,7 +293,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
           <div className="sticky top-24 rounded-2xl overflow-hidden shadow-md border border-[#ebe2cf] bg-white group">
             <div className="relative h-[480px] sm:h-[580px] w-full overflow-hidden">
               <img
-                src="https://lh3.googleusercontent.com/aida/AEtjO1WYVBglUAjzMQtZxYOsMdBjzwkZIyh5ECgrs4r2o5nrdJtqVrRcpYmbIorQtalWVZwjSl0yHAb4hTEAlgcBihBPPjuCyYNKPx9Z-bVDWzKHX6fZQSY5OvkaOagOPrntsnoM7b19rmxuER032hy2pOycXmWFJMkbN6NKOTnmVToJYFPKtHonVCPEgnciraOXNImokOm0dAQ6Q_u9lRVUdPaM_8Hi91DlzmL7jhQ6LWtdlSAqmipExtH0N04k"
+                src={APP_IMAGES.hero}
                 alt="Ecosistema ColorLink Pintuco"
                 className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
               />

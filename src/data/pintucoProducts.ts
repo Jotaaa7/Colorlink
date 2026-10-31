@@ -1,4 +1,5 @@
 import { ProjectRequest, SurfaceType, SurfaceCondition } from '../types';
+import { APP_IMAGES } from '../assets/images';
 
 export interface PintucoCatalogItem {
   sku: string;
@@ -69,7 +70,7 @@ export const PINTUCO_CATALOG: PintucoCatalogItem[] = [
     solidsByVolume: 48,
     voc: '< 380 g/L',
     sheen: 'Brillante / Satinado',
-    image: 'https://images.unsplash.com/photo-1504917599217-d4dc5ebe6122?w=400&q=80',
+    image: APP_IMAGES.metalPaint,
     recommendedSurfaces: ['Metal', 'Tanque Industrial'],
     indoorOutdoor: 'ambos',
     hasColors: true,
@@ -201,7 +202,7 @@ export const SAMPLE_PHOTO_PRESETS: SamplePhotoPreset[] = [
     surface: 'Pared',
     condition: 'Para Repintar',
     environment: 'interior',
-    url: 'https://lh3.googleusercontent.com/aida/AEtjO1WYVBglUAjzMQtZxYOsMdBjzwkZIyh5ECgrs4r2o5nrdJtqVrRcpYmbIorQtalWVZwjSl0yHAb4hTEAlgcBihBPPjuCyYNKPx9Z-bVDWzKHX6fZQSY5OvkaOagOPrntsnoM7b19rmxuER032hy2pOycXmWFJMkbN6NKOTnmVToJYFPKtHonVCPEgnciraOXNImokOm0dAQ6Q_u9lRVUdPaM_8Hi91DlzmL7jhQ6LWtdlSAqmipExtH0N04k',
+    url: APP_IMAGES.hero,
     suggestedM2: 45,
   },
   {
@@ -228,7 +229,7 @@ export const SAMPLE_PHOTO_PRESETS: SamplePhotoPreset[] = [
     surface: 'Metal',
     condition: 'Con Óxido',
     environment: 'exterior',
-    url: 'https://images.unsplash.com/photo-1504917599217-d4dc5ebe6122?w=800&q=80',
+    url: APP_IMAGES.metalPaint,
     suggestedM2: 35,
   },
 ];
@@ -250,7 +251,7 @@ export const INITIAL_DEMO_REQUEST: ProjectRequest = {
   surfaceType: 'Pared',
   condition: 'Para Repintar',
   environment: 'interior',
-  photoUrl: 'https://lh3.googleusercontent.com/aida/AEtjO1WYVBglUAjzMQtZxYOsMdBjzwkZIyh5ECgrs4r2o5nrdJtqVrRcpYmbIorQtalWVZwjSl0yHAb4hTEAlgcBihBPPjuCyYNKPx9Z-bVDWzKHX6fZQSY5OvkaOagOPrntsnoM7b19rmxuER032hy2pOycXmWFJMkbN6NKOTnmVToJYFPKtHonVCPEgnciraOXNImokOm0dAQ6Q_u9lRVUdPaM_8Hi91DlzmL7jhQ6LWtdlSAqmipExtH0N04k',
+  photoUrl: APP_IMAGES.hero,
   additionalDetails: 'Proyecto de remodelación de oficinas boutique. Se requiere acabado mate de alta lavabilidad en tonalidades arena cálido y terracota suave. Importante entrega puntual por inauguración de sede.',
   colorFamily: 'Arena Cálido / Terracota Pintuco #E29D80',
   finishPreference: 'Mate',

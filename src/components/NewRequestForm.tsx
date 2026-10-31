@@ -10,6 +10,7 @@ import {
 import { SAMPLE_PHOTO_PRESETS, SamplePhotoPreset } from '../data/pintucoProducts';
 import { ColorSelectorModal, ColorSelectionResult } from './ColorSelectorModal';
 import { PINTUCO_SUGGESTED_COLORS } from '../lib/colorUtils';
+import { APP_IMAGES } from '../assets/images';
 import {
   UploadCloud,
   CheckCircle2,
@@ -162,15 +163,11 @@ export const NewRequestForm: React.FC<NewRequestFormProps> = ({
         <div className="w-full lg:w-1/3 shrink-0">
           <div className="sticky top-24 rounded-2xl overflow-hidden shadow-md border border-[#ebe2cf] bg-white group">
             <div className="relative h-[480px] sm:h-[580px] w-full overflow-hidden bg-gradient-to-br from-[#1f1b10] via-[#3a2f18] to-[#121008]">
-              {photoUrl ? (
-                <img
-                  src={photoUrl}
-                  alt="Registro fotográfico del proyecto"
-                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
-                />
-              ) : (
-                <div className="w-full h-full opacity-40 bg-[radial-gradient(#ffd100_1px,transparent_1px)] [background-size:16px_16px]"></div>
-              )}
+              <img
+                src={photoUrl || APP_IMAGES.hero}
+                alt="Registro fotográfico del proyecto"
+                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
+              />
               <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/40 to-transparent flex flex-col justify-end p-6 sm:p-8">
                 <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#ffd100] text-[#1f1b10] text-xs font-bold w-fit mb-3 shadow-xs">
                   <Sparkles className="w-3.5 h-3.5" />
