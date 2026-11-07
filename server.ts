@@ -685,12 +685,18 @@ app.post("/api/test/email", async (req, res) => {
   const smtpStatus = getSmtpStatus();
 
   try {
-    const result = await sendWelcomeEmail({
+    const emailPromise = sendWelcomeEmail({
       fullName: "Prueba Técnica ColorLink Pintuco",
       email: targetEmail,
       role: "Especialista Técnico Pintuco",
       city: "Medellín / Bogotá",
     });
+
+    const timeoutPromise = new Promise<any>((_, reject) =>
+      setTimeout(() => reject(new Error("Tiempo de espera agotado (8 segundos) conectando al servidor de correo.")), 8000)
+    );
+
+    const result = await Promise.race([emailPromise, timeoutPromise]);
 
     const isRedirected = Boolean(result.redirected);
     const message = result.success
@@ -709,7 +715,21 @@ app.post("/api/test/email", async (req, res) => {
       message,
     });
   } catch (err: any) {
-    return res.status(500).json({ success: false, error: err.message });
+    console.error("Test email error/timeout:", err.message);
+    return res.status(200).json({
+      success: false,
+      resendStatus,
+      smtpStatus,
+      canSendToAnyEmail: Boolean(smtpStatus.isConfigured || resendStatus.hasCustomDomain),
+      providerUsed: "Error",
+      message: err.message || "Error procesando envío de prueba",
+      result: {
+        success: false,
+        simulated: false,
+        error: err.message,
+        diagnostic: "Si usas Gmail SMTP, comprueba que la contraseña de aplicación no tenga espacios y que la verificación en dos pasos siga activa en Google.",
+      },
+    });
   }
 });
 

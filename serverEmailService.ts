@@ -198,6 +198,9 @@ export function getEmailTransporter() {
         user,
         pass,
       },
+      connectionTimeout: 6000,
+      greetingTimeout: 4000,
+      socketTimeout: 8000,
     });
   }
 
@@ -213,6 +216,9 @@ export function getEmailTransporter() {
         user,
         pass,
       },
+      connectionTimeout: 6000,
+      greetingTimeout: 4000,
+      socketTimeout: 8000,
       tls: {
         rejectUnauthorized: false,
       },

@@ -141,12 +141,22 @@ export const SupportModal: React.FC<SupportModalProps> = ({ isOpen, onClose, cur
     setIsTestingEmail(true);
     setTestResult(null);
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+
     try {
       const res = await fetch('/api/test/email', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ toEmail: testEmail.trim() }),
+        signal: controller.signal,
       });
+
+      clearTimeout(timeoutId);
+
+      if (!res.ok) {
+        throw new Error(`El servidor respondió con código ${res.status}`);
+      }
 
       const data = await res.json();
       setTestResult({
@@ -160,10 +170,16 @@ export const SupportModal: React.FC<SupportModalProps> = ({ isOpen, onClose, cur
       // Refresh status logs
       fetchStatus();
     } catch (err: any) {
+      clearTimeout(timeoutId);
+      const isAbort = err.name === 'AbortError';
       setTestResult({
         success: false,
-        message: 'Error de red al conectar con el servidor de correos',
+        message: isAbort
+          ? 'Tiempo de espera agotado al conectar con el servidor de correo (10s)'
+          : 'Error de conexión con el servidor',
         error: err.message,
+        diagnostic:
+          'Verifica que las credenciales SMTP en .env sean correctas y que la cuenta de Google permita el acceso.',
       });
     } finally {
       setIsTestingEmail(false);
