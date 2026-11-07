@@ -270,7 +270,7 @@ async function sendOrSimulateEmail(options: {
 }): Promise<EmailResult> {
   const resendStatus = getResendStatus();
   const smtpStatus = getSmtpStatus();
-  const accountEmail = (process.env.RESEND_ACCOUNT_EMAIL || process.env.RESEND_TEST_EMAIL || 'Stivengamer1803@gmail.com').trim();
+  const accountEmail = (process.env.RESEND_ACCOUNT_EMAIL || process.env.RESEND_TEST_EMAIL || '').trim();
   const normalizedTarget = options.to.trim().toLowerCase();
   const isTargetAccountOwner = normalizedTarget === accountEmail.toLowerCase();
 
