@@ -101,7 +101,7 @@ export function getRecentEmailLogs(): EmailLogEntry[] {
   return [...emailLogs].reverse().slice(0, 15);
 }
 
-let detectedResendAccountEmail = (process.env.RESEND_ACCOUNT_EMAIL || 'jsramirezb18@gmail.com').trim();
+let detectedResendAccountEmail = (process.env.RESEND_ACCOUNT_EMAIL || process.env.RESEND_TEST_EMAIL || '').trim();
 
 /**
  * Checks Resend configuration status and detects placeholder dummy keys
@@ -120,7 +120,6 @@ export function getResendStatus() {
   const hasCustomDomain = Boolean(
     process.env.RESEND_FROM && !process.env.RESEND_FROM.includes('onboarding@resend.dev')
   );
-  const accountEmail = (process.env.RESEND_ACCOUNT_EMAIL || detectedResendAccountEmail).trim();
 
   return {
     isConfigured,
@@ -128,11 +127,10 @@ export function getResendStatus() {
     rawKeyMasked: rawKey ? `${rawKey.slice(0, 6)}...${rawKey.slice(-4)}` : 'No configurada',
     sender,
     hasCustomDomain,
-    accountEmail,
     note: isDummy
       ? "La variable RESEND_API_KEY contiene un valor de prueba/placeholder ('re_123456789_abcdefg')."
       : isConfigured && !hasCustomDomain
-      ? `Usando 'onboarding@resend.dev' de Resend. En el plan gratuito, Resend restringe el envío al correo del desarrollador (${accountEmail}). Las notificaciones a otros clientes se entregan en tu bandeja de entrada con el prefijo [Para: ...] para que puedas probarlas en vivo.`
+      ? "Usando 'onboarding@resend.dev' de Resend. En el plan gratuito, Resend restringe el envío al correo del desarrollador registrado en la cuenta. Las notificaciones se entregan con el prefijo [Para: ...] para que puedas probarlas en vivo."
       : "Configuración de Resend activa con dominio personalizado verificado.",
   };
 }

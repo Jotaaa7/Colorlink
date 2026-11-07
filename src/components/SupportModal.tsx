@@ -26,7 +26,6 @@ interface ResendStatusData {
   rawKeyMasked: string;
   sender: string;
   hasCustomDomain: boolean;
-  accountEmail?: string;
   note: string;
 }
 
@@ -47,7 +46,7 @@ export const SupportModal: React.FC<SupportModalProps> = ({ isOpen, onClose, cur
   // Support ticket form
   const [ticketSubject, setTicketSubject] = useState('');
   const [ticketMsg, setTicketMsg] = useState('');
-  const [ticketEmail, setTicketEmail] = useState(currentUser?.email || 'Stivengamer1803@gmail.com');
+  const [ticketEmail, setTicketEmail] = useState(currentUser?.email || '');
   const [isSubmittingTicket, setIsSubmittingTicket] = useState(false);
   const [ticketSubmitted, setTicketSubmitted] = useState(false);
   const [ticketError, setTicketError] = useState('');
@@ -57,7 +56,7 @@ export const SupportModal: React.FC<SupportModalProps> = ({ isOpen, onClose, cur
   const [smtpStatus, setSmtpStatus] = useState<SmtpStatusData | null>(null);
   const [canSendToAnyEmail, setCanSendToAnyEmail] = useState<boolean>(false);
   const [activeMode, setActiveMode] = useState<string>('');
-  const [testEmail, setTestEmail] = useState(currentUser?.email || 'Stivengamer1803@gmail.com');
+  const [testEmail, setTestEmail] = useState(currentUser?.email || '');
   const [isTestingEmail, setIsTestingEmail] = useState(false);
   const [showGmailInstructions, setShowGmailInstructions] = useState(false);
   const [testResult, setTestResult] = useState<{
@@ -415,7 +414,7 @@ export const SupportModal: React.FC<SupportModalProps> = ({ isOpen, onClose, cur
                   </p>
                 ) : (
                   <p>
-                    Con el remitente gratuito <code>onboarding@resend.dev</code>, Resend restringe el envío al correo del desarrollador (<code>{resendStatus?.accountEmail || 'Stivengamer1803@gmail.com'}</code>). Por eso, todas las notificaciones a clientes, cotizaciones y facturas <strong>te llegan a tu bandeja de entrada con el prefijo <code>[Para: cliente@...]</code></strong> para que las audites sin perder ninguna información.
+                    Con el remitente gratuito <code>onboarding@resend.dev</code>, Resend restringe el envío al correo del propietario registrado en la cuenta. Por eso, todas las notificaciones a clientes, cotizaciones y facturas <strong>se redirigen a dicha bandeja de entrada con el prefijo <code>[Para: cliente@...]</code></strong> para que las audites sin perder ninguna información.
                   </p>
                 )}
               </div>

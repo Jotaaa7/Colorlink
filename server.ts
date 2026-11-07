@@ -820,7 +820,13 @@ app.get("/api/notifications/status", (req, res) => {
 // Notifications: Test Email Configuration (Resend & SMTP Diagnostic Endpoint)
 app.post("/api/test/email", async (req, res) => {
   const { toEmail } = req.body || {};
-  const targetEmail = toEmail ? toEmail.trim() : (process.env.RESEND_ACCOUNT_EMAIL || process.env.RESEND_TEST_EMAIL || "Stivengamer1803@gmail.com");
+  const targetEmail = toEmail ? toEmail.trim() : (process.env.RESEND_ACCOUNT_EMAIL || process.env.RESEND_TEST_EMAIL || "");
+  if (!targetEmail) {
+    return res.status(400).json({
+      success: false,
+      message: "Debes ingresar un correo electrónico destinatario para realizar la prueba.",
+    });
+  }
   const resendStatus = getResendStatus();
   const smtpStatus = getSmtpStatus();
 
