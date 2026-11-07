@@ -1,7 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ProjectRequest } from '../../types';
 import { AdvisorStatusModal, ValidProjectStatus } from './AdvisorStatusModal';
-import { sendProjectStatusNotification } from '../../services/renderDbService';
+import {
+  sendProjectStatusNotification,
+  fetchProjectsFromDb,
+  saveProjectToDb,
+} from '../../services/renderDbService';
 import {
   Search,
   Filter,
@@ -44,6 +48,7 @@ export const AdvisorRequestsView: React.FC<AdvisorRequestsViewProps> = ({
   const [surfaceFilter, setSurfaceFilter] = useState<string>('todas');
   const [inspectingRequest, setInspectingRequest] = useState<ProjectRequest | null>(null);
   const [statusModalRequest, setStatusModalRequest] = useState<ProjectRequest | null>(null);
+  const [isLoadingDb, setIsLoadingDb] = useState(false);
 
   // Standard demonstration requests + dynamic active user request
   const [requestsList, setRequestsList] = useState<ProjectRequest[]>(() => {
@@ -119,6 +124,53 @@ export const AdvisorRequestsView: React.FC<AdvisorRequestsViewProps> = ({
     return Array.from(new Map(initialList.map((item) => [item.id, item])).values());
   });
 
+  // Dynamically load all real requests from Render PostgreSQL on mount
+  const refreshRequestsFromDb = async () => {
+    setIsLoadingDb(true);
+    try {
+      const dbProjects = await fetchProjectsFromDb();
+      if (dbProjects && Array.isArray(dbProjects) && dbProjects.length > 0) {
+        const normalized = dbProjects.map((p: any) => ({
+          ...p,
+          client: p.client || {
+            fullName: p.clientName || 'Cliente ColorLink',
+            email: p.clientEmail || '',
+            phone: p.clientPhone || '',
+            documentType: p.clientType || 'NIT',
+            documentNumber: '',
+          },
+          surfaceType: p.surfaceType || 'Pared',
+          city: p.city || 'Bogotá',
+          address: p.address || 'Dirección registrada',
+          areaM2: Number(p.areaM2) || 45,
+          status: p.status || 'Registrada',
+        }));
+
+        setRequestsList((prev) => {
+          const map = new Map<string, ProjectRequest>();
+          // Add all database requests first
+          normalized.forEach((it) => map.set(it.id, it));
+          if (currentRequest) {
+            map.set(currentRequest.id, currentRequest);
+          }
+          // Preserve demo items if needed
+          prev.forEach((it) => {
+            if (!map.has(it.id)) map.set(it.id, it);
+          });
+          return Array.from(map.values());
+        });
+      }
+    } catch (err) {
+      console.warn('Error cargando solicitudes en AdvisorRequestsView:', err);
+    } finally {
+      setIsLoadingDb(false);
+    }
+  };
+
+  useEffect(() => {
+    refreshRequestsFromDb();
+  }, [currentRequest?.id]);
+
   const handleSaveStatus = (newStatus: ValidProjectStatus, advisorNote?: string, trackingNumber?: string) => {
     if (!statusModalRequest) return;
 
@@ -140,6 +192,9 @@ export const AdvisorRequestsView: React.FC<AdvisorRequestsViewProps> = ({
     if (onUpdateProject) {
       onUpdateProject(updated);
     }
+    // Asynchronously save to PostgreSQL in Render
+    saveProjectToDb(updated).catch((err) => console.warn('Error actualizando proyecto en BD:', err));
+
     // Asynchronously send project status update email to the customer
     sendProjectStatusNotification(updated, newStatus, statusModalRequest.status);
     onShowToast(`Estado del expediente ${updated.id} actualizado a: "${newStatus}"`);
@@ -147,12 +202,17 @@ export const AdvisorRequestsView: React.FC<AdvisorRequestsViewProps> = ({
   };
 
   const filteredRequests = requestsList.filter((req) => {
+    const clientName = req.client?.fullName || (req as any).clientName || 'Cliente';
+    const city = req.city || '';
+    const address = req.address || '';
+    const surface = req.surfaceType || '';
+
     const matchesSearch =
-      req.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      req.client.fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      req.city.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      req.address.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (req.surfaceType && req.surfaceType.toLowerCase().includes(searchTerm.toLowerCase()));
+      (req.id || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      clientName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      city.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      address.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      surface.toLowerCase().includes(searchTerm.toLowerCase());
 
     const matchesStatus =
       statusFilter === 'todas' ||
@@ -241,12 +301,25 @@ export const AdvisorRequestsView: React.FC<AdvisorRequestsViewProps> = ({
           </p>
         </div>
 
-        {/* Quick action info */}
-        <div className="flex items-center gap-3 bg-[#fcf3e0] px-4 py-3 rounded-xl border border-[#ebe2cf] shrink-0">
-          <Sparkles className="w-5 h-5 text-[#2f5ea1] shrink-0" />
-          <div className="text-xs">
-            <p className="font-bold text-[#1f1b10]">Motor IA Pintuco Activo</p>
-            <p className="text-[#7f765f]">Pre-evaluación automática en cada expediente</p>
+        {/* Quick action info & Refresh Button */}
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={refreshRequestsFromDb}
+            disabled={isLoadingDb}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white hover:bg-[#f6eddb] border border-[#d1c6ab] text-xs font-bold text-[#725c00] transition-colors shadow-2xs cursor-pointer disabled:opacity-50"
+            title="Recargar solicitudes de la base de datos"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isLoadingDb ? 'animate-spin' : ''}`} />
+            <span>{isLoadingDb ? 'Sincronizando...' : 'Actualizar'}</span>
+          </button>
+
+          <div className="flex items-center gap-2.5 bg-[#fcf3e0] px-3.5 py-2 rounded-xl border border-[#ebe2cf]">
+            <Sparkles className="w-4 h-4 text-[#2f5ea1] shrink-0" />
+            <div className="text-[11px]">
+              <span className="font-bold text-[#1f1b10] block">PostgreSQL Conectado</span>
+              <span className="text-[#7f765f]">{requestsList.length} registros en sistema</span>
+            </div>
           </div>
         </div>
       </div>
@@ -384,11 +457,11 @@ export const AdvisorRequestsView: React.FC<AdvisorRequestsViewProps> = ({
                     <div>
                       <h3 className="text-base font-black text-[#1f1b10] flex items-center gap-2">
                         <User className="w-4 h-4 text-[#2f5ea1]" />
-                        {req.client.fullName}
+                        {req.client?.fullName || (req as any).clientName || 'Cliente ColorLink'}
                       </h3>
                       <p className="text-xs text-[#7f765f] flex items-center gap-1.5 mt-0.5">
                         <MapPin className="w-3.5 h-3.5 text-[#725c00]" />
-                        <span>{req.address} • <strong>{req.city}</strong></span>
+                        <span>{req.address || 'Dirección registrada'} • <strong>{req.city || 'Colombia'}</strong></span>
                       </p>
                     </div>
 
@@ -489,7 +562,9 @@ export const AdvisorRequestsView: React.FC<AdvisorRequestsViewProps> = ({
                   <h3 className="text-base font-black text-[#1f1b10]">
                     Expediente {inspectingRequest.id}
                   </h3>
-                  <p className="text-xs text-[#7f765f]">{inspectingRequest.client.fullName}</p>
+                  <p className="text-xs text-[#7f765f]">
+                    {inspectingRequest.client?.fullName || (inspectingRequest as any).clientName || 'Cliente ColorLink'}
+                  </p>
                 </div>
               </div>
               <button
@@ -510,19 +585,22 @@ export const AdvisorRequestsView: React.FC<AdvisorRequestsViewProps> = ({
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[#1f1b10]">
                   <div className="flex items-center gap-2">
                     <User className="w-4 h-4 text-[#2f5ea1]" />
-                    <span><strong>{inspectingRequest.client.documentType}:</strong> {inspectingRequest.client.documentNumber}</span>
+                    <span>
+                      <strong>{inspectingRequest.client?.documentType || 'Documento'}:</strong>{' '}
+                      {inspectingRequest.client?.documentNumber || 'No especificado'}
+                    </span>
                   </div>
                   <div className="flex items-center gap-2">
                     <Phone className="w-4 h-4 text-[#2f5ea1]" />
-                    <span>{inspectingRequest.client.phone}</span>
+                    <span>{inspectingRequest.client?.phone || (inspectingRequest as any).clientPhone || 'Sin teléfono'}</span>
                   </div>
                   <div className="flex items-center gap-2 col-span-2">
                     <Mail className="w-4 h-4 text-[#2f5ea1]" />
-                    <span>{inspectingRequest.client.email}</span>
+                    <span>{inspectingRequest.client?.email || (inspectingRequest as any).clientEmail || 'Sin correo registrado'}</span>
                   </div>
                   <div className="flex items-center gap-2 col-span-2">
                     <MapPin className="w-4 h-4 text-[#725c00]" />
-                    <span>{inspectingRequest.address}, {inspectingRequest.city}</span>
+                    <span>{inspectingRequest.address || 'Dirección registrada'}, {inspectingRequest.city}</span>
                   </div>
                 </div>
               </div>

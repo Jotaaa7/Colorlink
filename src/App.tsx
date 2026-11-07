@@ -200,16 +200,44 @@ export default function App() {
     initDatabases();
   }, []);
 
-  const handleLoginSuccess = (user: UserProfile) => {
+  const handleLoginSuccess = async (user: UserProfile) => {
     setCurrentUser(user);
     try {
       localStorage.setItem('colorlink_user', JSON.stringify(user));
       // Load user's isolated project request
       if (isAdvisorRole(user.role)) {
-        setCurrentRequest(INITIAL_DEMO_REQUEST);
+        const pgProjects = await fetchProjectsFromDb();
+        if (pgProjects && pgProjects.length > 0) {
+          setCurrentRequest(pgProjects[0]);
+        } else {
+          setCurrentRequest(INITIAL_DEMO_REQUEST);
+        }
       } else {
         const userSavedReq = localStorage.getItem(`colorlink_user_request_${user.email}`);
-        setCurrentRequest(userSavedReq ? JSON.parse(userSavedReq) : null);
+        if (userSavedReq) {
+          setCurrentRequest(JSON.parse(userSavedReq));
+        } else {
+          const pgProjects = await fetchProjectsFromDb();
+          if (pgProjects && pgProjects.length > 0) {
+            const userProj = pgProjects.find(
+              (p: any) =>
+                p.client?.email?.toLowerCase() === user.email.toLowerCase() ||
+                p.clientEmail?.toLowerCase() === user.email.toLowerCase()
+            );
+            if (userProj) {
+              setCurrentRequest(userProj);
+              try {
+                localStorage.setItem(`colorlink_user_request_${user.email}`, JSON.stringify(userProj));
+              } catch {
+                // ignore
+              }
+            } else {
+              setCurrentRequest(null);
+            }
+          } else {
+            setCurrentRequest(null);
+          }
+        }
       }
     } catch {
       // ignore
@@ -606,6 +634,7 @@ export default function App() {
             onNavigateToAdvisorPortal={() => setActiveTab('advisor_portal')}
             onUpdateProject={handleUpdateProjectRequest}
             onNavigateToStore={() => setActiveTab('direct_store')}
+            onSelectProject={(selectedProj) => setCurrentRequest(selectedProj)}
           />
         ) : activeTab === 'advisor_portal' ? (
           <AdvisorEvaluationScreen

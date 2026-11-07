@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ProjectRequest } from '../../types';
+import { fetchProjectsFromDb, fetchOrdersFromDb } from '../../services/renderDbService';
 import {
   Receipt,
   Search,
@@ -14,6 +15,7 @@ import {
   User,
   Building2,
   FileSpreadsheet,
+  RefreshCw,
 } from 'lucide-react';
 
 interface AdvisorHistoryViewProps {
@@ -41,64 +43,146 @@ export const AdvisorHistoryView: React.FC<AdvisorHistoryViewProps> = ({
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'todas' | 'aprobadas' | 'produccion' | 'emitidas'>('todas');
+  const [isLoading, setIsLoading] = useState(false);
 
-  const historyData: HistoricalQuote[] = [
-    {
-      quoteNumber: request?.quotation?.quoteNumber || 'COT-PT-2024-8924',
-      clientName: request?.client.fullName || 'Andrés Cepeda',
-      city: request?.city || 'Bogotá D.C.',
-      date: '12/05/2024',
-      validUntil: '27/05/2024',
-      totalCOP: request?.quotation?.totalCOP || 452900,
-      sapOrderNumber: 'VA01-450098231',
-      status: 'Aprobada',
-      itemsCount: request?.quotation?.items.length || 3,
-    },
-    {
-      quoteNumber: 'COT-PT-2024-8840',
-      clientName: 'Constructora Bolívar - Ing. Marcela Duarte',
-      city: 'Medellín',
-      date: '08/05/2024',
-      validUntil: '23/05/2024',
-      totalCOP: 18450000,
-      sapOrderNumber: 'VA01-450097940',
-      status: 'En Producción',
-      itemsCount: 6,
-    },
-    {
-      quoteNumber: 'COT-PT-2024-8712',
-      clientName: 'Estudio Espacio - Arq. Valeria Gómez',
-      city: 'Cali',
-      date: '03/05/2024',
-      validUntil: '18/05/2024',
-      totalCOP: 3120000,
-      sapOrderNumber: 'VA01-450096811',
-      status: 'Aprobada',
-      itemsCount: 4,
-    },
-    {
-      quoteNumber: 'COT-PT-2024-8650',
-      clientName: 'Taller & Carrocerías Los Andes',
-      city: 'Bucaramanga',
-      date: '28/04/2024',
-      validUntil: '13/05/2024',
-      totalCOP: 1250000,
-      sapOrderNumber: 'VA01-450095902',
-      status: 'Emitida',
-      itemsCount: 2,
-    },
-    {
-      quoteNumber: 'COT-PT-2024-8591',
-      clientName: 'Hotel Boutique El Virrey',
-      city: 'Bogotá D.C.',
-      date: '22/04/2024',
-      validUntil: '07/05/2024',
-      totalCOP: 5670000,
-      sapOrderNumber: 'VA01-450094819',
-      status: 'Aprobada',
-      itemsCount: 5,
-    },
-  ];
+  const [historyList, setHistoryList] = useState<HistoricalQuote[]>(() => {
+    const list: HistoricalQuote[] = [
+      {
+        quoteNumber: request?.quotation?.quoteNumber || 'COT-PT-2024-8924',
+        clientName: request?.client?.fullName || (request as any)?.clientName || 'Andrés Cepeda',
+        city: request?.city || 'Bogotá D.C.',
+        date: '12/05/2024',
+        validUntil: '27/05/2024',
+        totalCOP: request?.quotation?.totalCOP || 452900,
+        sapOrderNumber: 'VA01-450098231',
+        status: 'Aprobada',
+        itemsCount: request?.quotation?.items?.length || 3,
+      },
+      {
+        quoteNumber: 'COT-PT-2024-8840',
+        clientName: 'Constructora Bolívar - Ing. Marcela Duarte',
+        city: 'Medellín',
+        date: '08/05/2024',
+        validUntil: '23/05/2024',
+        totalCOP: 18450000,
+        sapOrderNumber: 'VA01-450097940',
+        status: 'En Producción',
+        itemsCount: 6,
+      },
+      {
+        quoteNumber: 'COT-PT-2024-8712',
+        clientName: 'Estudio Espacio - Arq. Valeria Gómez',
+        city: 'Cali',
+        date: '03/05/2024',
+        validUntil: '18/05/2024',
+        totalCOP: 3120000,
+        sapOrderNumber: 'VA01-450096811',
+        status: 'Aprobada',
+        itemsCount: 4,
+      },
+      {
+        quoteNumber: 'COT-PT-2024-8650',
+        clientName: 'Taller & Carrocerías Los Andes',
+        city: 'Bucaramanga',
+        date: '28/04/2024',
+        validUntil: '13/05/2024',
+        totalCOP: 1250000,
+        sapOrderNumber: 'VA01-450095902',
+        status: 'Emitida',
+        itemsCount: 2,
+      },
+      {
+        quoteNumber: 'COT-PT-2024-8591',
+        clientName: 'Hotel Boutique El Virrey',
+        city: 'Bogotá D.C.',
+        date: '22/04/2024',
+        validUntil: '07/05/2024',
+        totalCOP: 5670000,
+        sapOrderNumber: 'VA01-450094819',
+        status: 'Aprobada',
+        itemsCount: 5,
+      },
+    ];
+    return list;
+  });
+
+  const loadRealHistoryFromDb = async () => {
+    setIsLoading(true);
+    try {
+      const [projects, orders] = await Promise.all([
+        fetchProjectsFromDb(),
+        fetchOrdersFromDb(),
+      ]);
+
+      const realQuotes: HistoricalQuote[] = [];
+
+      if (projects && Array.isArray(projects)) {
+        projects.forEach((p: any) => {
+          const clientName = p.client?.fullName || p.clientName || 'Cliente ColorLink';
+          const quoteNum = p.quotation?.quoteNumber || `COT-${p.id}`;
+          const dateStr = p.createdAt ? new Date(p.createdAt).toLocaleDateString('es-CO') : 'Reciente';
+          const total = p.quotation?.totalCOP || (p.diagnosis?.recommendedProducts ? 850000 : 450000);
+          const rawStatus = p.status || 'Cotizada';
+          const mappedStatus: 'Aprobada' | 'En Producción' | 'Emitida' | 'Vencida' =
+            rawStatus === 'Aprobada QA' || rawStatus === 'Completada' || rawStatus === 'Inventario Asignado'
+              ? 'Aprobada'
+              : rawStatus === 'En Producción'
+              ? 'En Producción'
+              : 'Emitida';
+
+          realQuotes.push({
+            quoteNumber: quoteNum,
+            clientName,
+            city: p.city || 'Bogotá D.C.',
+            date: dateStr,
+            validUntil: '30 días',
+            totalCOP: Number(total) || 0,
+            sapOrderNumber: p.productionOrder?.orderId || `VA01-${Math.floor(450000000 + Math.random() * 99999)}`,
+            status: mappedStatus,
+            itemsCount: p.quotation?.items?.length || 2,
+          });
+        });
+      }
+
+      if (orders && Array.isArray(orders)) {
+        orders.forEach((ord: any) => {
+          const clientName = ord.customer?.fullName || ord.customerName || 'Cliente Tienda Directa';
+          const orderNum = ord.sapOrderCode || ord.sapOrderNumber || ord.id || `ORD-${Date.now()}`;
+          const dateStr = ord.createdAt ? new Date(ord.createdAt).toLocaleDateString('es-CO') : 'Reciente';
+          realQuotes.push({
+            quoteNumber: orderNum,
+            clientName,
+            city: ord.shipping?.city || ord.deliveryCity || 'Colombia',
+            date: dateStr,
+            validUntil: 'Completado',
+            totalCOP: Number(ord.total || ord.totalCOP) || 0,
+            sapOrderNumber: ord.sapOrderCode || 'SAP-CONFIRMADO',
+            status: 'Aprobada',
+            itemsCount: Array.isArray(ord.items) ? ord.items.length : 1,
+          });
+        });
+      }
+
+      if (realQuotes.length > 0) {
+        setHistoryList((prev) => {
+          const map = new Map<string, HistoricalQuote>();
+          realQuotes.forEach((q) => map.set(q.quoteNumber, q));
+          prev.forEach((q) => {
+            if (!map.has(q.quoteNumber)) map.set(q.quoteNumber, q);
+          });
+          return Array.from(map.values());
+        });
+      }
+    } catch (err) {
+      console.warn('Error cargando historial en AdvisorHistoryView:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadRealHistoryFromDb();
+  }, [request?.id]);
 
   const formatCOP = (val: number) => {
     return new Intl.NumberFormat('es-CO', {
@@ -108,12 +192,18 @@ export const AdvisorHistoryView: React.FC<AdvisorHistoryViewProps> = ({
     }).format(val);
   };
 
-  const filteredQuotes = historyData.filter((q) => {
+  const filteredQuotes = historyList.filter((q) => {
+    const qNum = (q.quoteNumber || '').toLowerCase();
+    const cName = (q.clientName || '').toLowerCase();
+    const sapNum = (q.sapOrderNumber || '').toLowerCase();
+    const city = (q.city || '').toLowerCase();
+    const sTerm = searchTerm.toLowerCase();
+
     const matchesSearch =
-      q.quoteNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      q.clientName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      q.sapOrderNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      q.city.toLowerCase().includes(searchTerm.toLowerCase());
+      qNum.includes(sTerm) ||
+      cName.includes(sTerm) ||
+      sapNum.includes(sTerm) ||
+      city.includes(sTerm);
 
     const matchesStatus =
       statusFilter === 'todas' ||

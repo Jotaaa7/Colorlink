@@ -97,6 +97,13 @@ const mockProjects = new Map<string, any>([
     "REQ-2026-7841",
     {
       id: "REQ-2026-7841",
+      client: {
+        fullName: "Constructora & Diseños Andinos SAS",
+        email: "contacto@disenosandinos.co",
+        phone: "+57 (601) 745-8900",
+        documentType: "NIT",
+        documentNumber: "900.584.210-7",
+      },
       clientName: "Constructora & Diseños Andinos SAS",
       clientEmail: "contacto@disenosandinos.co",
       clientPhone: "+57 (601) 745-8900",
@@ -106,9 +113,40 @@ const mockProjects = new Map<string, any>([
       condition: "Nuevo",
       areaM2: 180,
       city: "Bogotá DC",
+      address: "Calle 100 # 19-61, Piso 5",
       comments: "Acabado de alta lavabilidad para recepción y salas de juntas.",
+      additionalDetails: "Acabado de alta lavabilidad para recepción y salas de juntas.",
       status: "Inventario Asignado",
       assignedAdvisor: "Ing. Carlos Mendoza (Pintuco QA)",
+      diagnosis: {
+        diagnosticSummary: "Superficie de mampostería interior nueva en obra civil.",
+        recommendedProducts: [
+          {
+            name: "Viniltex® Avanzado Antibacterial",
+            type: "Acabado Principal",
+            sku: "PT-VX-1010",
+            coverageM2PerGal: 35,
+            recommendedCoats: 2,
+            totalGallonsNeeded: 11,
+            estimatedCostCOP: 1039500,
+            reason: "Alta lavabilidad y certificado antibacterial.",
+          },
+        ],
+        surfacePreparation: [
+          "Limpieza de polvo y partículas sueltas.",
+          "Aplicación de Sellomax para sellar porosidad.",
+        ],
+        applicationAdvice: {
+          recommendedTools: ["Rodillo microfibra 3/8", "Brocha nylon 2.5\""],
+          dilution: "10% agua limpia",
+          dryingTimeTouch: "1 hora",
+          dryingTimeBetweenCoats: "3 horas",
+          cureTime: "7 días",
+        },
+        qualityCheckpoints: ["Verificar secado previo"],
+        operationalAlert: "Stock confirmado en CEDI Bogotá",
+        environmentalFactor: "Clima frío moderado",
+      },
       aiDiagnosis: {
         diagnosticSummary: "Superficie de mampostería interior nueva en obra civil.",
         recommendedProducts: [
@@ -123,6 +161,30 @@ const mockProjects = new Map<string, any>([
             reason: "Alta lavabilidad y certificado antibacterial.",
           },
         ],
+      },
+      quotation: {
+        quoteNumber: "COT-PT-2026-7841",
+        date: "22/08/2026",
+        validUntil: "06/09/2026",
+        items: [
+          {
+            sku: "PT-VX-1010",
+            name: "Viniltex® Avanzado Antibacterial",
+            type: "Pintura Acabado",
+            unit: "Caneca (5 Gal) x 2 + Galón x 1",
+            quantity: 11,
+            unitPriceCOP: 94500,
+            totalCOP: 1039500,
+          },
+        ],
+        subtotalCOP: 1039500,
+        discountCOP: 51975,
+        taxCOP: 187630,
+        laborEstimateCOP: 0,
+        logisticsCOP: 0,
+        totalCOP: 1175155,
+        paymentTerms: "Crédito Corporativo 30 días",
+        estimatedLeadDays: 2,
       },
       createdAt: "2026-08-22T09:15:00Z",
       updatedAt: "2026-08-22T09:15:00Z",
@@ -186,6 +248,7 @@ async function initDatabaseTables() {
           assigned_advisor VARCHAR(255),
           ai_diagnosis JSONB,
           formulation JSONB,
+          data JSONB,
           created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
           updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
         );
@@ -225,7 +288,11 @@ async function initDatabaseTables() {
           updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
         );
       `);
-      console.log("✅ [Render PostgreSQL] Tablas 'users', 'project_requests' y 'direct_orders' listas y verificadas.");
+
+      // Ensure data JSONB column exists if table was created previously without it
+      await client.query("ALTER TABLE project_requests ADD COLUMN IF NOT EXISTS data JSONB;");
+
+      console.log("✅ [Render PostgreSQL] Tablas 'users', 'project_requests' (con data JSONB) y 'direct_orders' listas y verificadas.");
     } finally {
       client.release();
     }
@@ -269,58 +336,129 @@ app.get("/api/db/projects", async (req, res) => {
   if (pool) {
     try {
       const result = await pool.query("SELECT * FROM project_requests ORDER BY created_at DESC;");
-      const formatted = result.rows.map((row: any) => ({
-        id: row.id,
-        clientName: row.client_name,
-        clientEmail: row.client_email,
-        clientPhone: row.client_phone,
-        clientType: row.client_type,
-        surfaceType: row.surface_type,
-        environment: row.environment,
-        condition: row.condition,
-        areaM2: Number(row.area_m2),
-        city: row.city,
-        comments: row.comments,
-        status: row.status,
-        assignedAdvisor: row.assigned_advisor,
-        aiDiagnosis: row.ai_diagnosis,
-        formulation: row.formulation,
-        createdAt: row.created_at,
-        updatedAt: row.updated_at,
-      }));
+      const formatted = result.rows.map((row: any) => {
+        let fullData: any = {};
+        if (row.data) {
+          try {
+            fullData = typeof row.data === "string" ? JSON.parse(row.data) : row.data;
+          } catch {
+            fullData = {};
+          }
+        }
+
+        const clientObj = fullData.client || {
+          fullName: row.client_name || "Cliente ColorLink",
+          email: row.client_email || "",
+          phone: row.client_phone || "",
+          documentType: row.client_type || "Cédula de Ciudadanía",
+          documentNumber: fullData.client?.documentNumber || "",
+        };
+
+        const diagnosisObj = fullData.diagnosis || row.ai_diagnosis;
+        const quotationObj = fullData.quotation || row.formulation;
+
+        return {
+          ...fullData,
+          id: row.id,
+          client: clientObj,
+          clientName: row.client_name || clientObj.fullName,
+          clientEmail: row.client_email || clientObj.email,
+          clientPhone: row.client_phone || clientObj.phone,
+          clientType: row.client_type || clientObj.documentType,
+          surfaceType: row.surface_type || fullData.surfaceType || "Pared",
+          environment: row.environment || fullData.environment || "interior",
+          condition: row.condition || fullData.condition || "Nuevo",
+          areaM2: Number(row.area_m2) || fullData.areaM2 || 45,
+          city: row.city || fullData.city || "Bogotá",
+          address: fullData.address || "Dirección registrada",
+          comments: row.comments || fullData.comments || fullData.additionalDetails || "",
+          additionalDetails: fullData.additionalDetails || row.comments || "",
+          status: row.status || fullData.status || "Registrada",
+          assignedAdvisor: row.assigned_advisor || fullData.assignedAdvisor || null,
+          diagnosis: diagnosisObj,
+          aiDiagnosis: diagnosisObj,
+          quotation: quotationObj,
+          formulation: quotationObj,
+          plantStocks: fullData.plantStocks || [],
+          productionOrder: fullData.productionOrder,
+          createdAt: row.created_at || fullData.createdAt || new Date().toISOString(),
+          updatedAt: row.updated_at || fullData.updatedAt || new Date().toISOString(),
+        };
+      });
       return res.json({ success: true, projects: formatted });
     } catch (err: any) {
       console.warn("Error fetching projects from PostgreSQL, falling back to mock:", err.message);
     }
   }
 
-  return res.json({ success: true, projects: Array.from(mockProjects.values()) });
+  // Fallback to in-memory store
+  const inMemory = Array.from(mockProjects.values()).map((p: any) => ({
+    ...p,
+    client: p.client || {
+      fullName: p.clientName || "Cliente ColorLink",
+      email: p.clientEmail || "",
+      phone: p.clientPhone || "",
+      documentType: p.clientType || "NIT",
+      documentNumber: "",
+    },
+    surfaceType: p.surfaceType || "Pared",
+    environment: p.environment || "interior",
+    condition: p.condition || "Nuevo",
+    areaM2: p.areaM2 || 45,
+    city: p.city || "Bogotá",
+    status: p.status || "Registrada",
+  }));
+
+  return res.json({ success: true, projects: inMemory });
 });
 
 // Render PostgreSQL: Upsert Project Request
 app.post("/api/db/projects", async (req, res) => {
   const p = req.body;
   const projectId = p?.id;
-  const clientName = p?.clientName || p?.client?.fullName;
-  const clientEmail = p?.clientEmail || p?.client?.email;
-  const clientPhone = p?.clientPhone || p?.client?.phone;
-  const clientType = p?.clientType || p?.client?.clientType || 'Particular';
+  const clientName = p?.client?.fullName || p?.clientName;
+  const clientEmail = p?.client?.email || p?.clientEmail;
+  const clientPhone = p?.client?.phone || p?.clientPhone;
+  const clientType = p?.client?.documentType || p?.clientType || "Particular";
 
   if (!p || !projectId || !clientName) {
     return res.status(400).json({ success: false, error: "Datos de proyecto incompletos" });
   }
 
-  // Update in-memory mock store
-  mockProjects.set(projectId, {
+  const normalizedProject = {
     ...p,
     id: projectId,
+    client: p.client || {
+      fullName: clientName,
+      email: clientEmail || "",
+      phone: clientPhone || "",
+      documentType: clientType,
+      documentNumber: p.client?.documentNumber || "",
+    },
     clientName,
     clientEmail,
     clientPhone,
     clientType,
+    surfaceType: p.surfaceType || "Pared",
+    environment: p.environment || "interior",
+    condition: p.condition || "Nuevo",
+    areaM2: Number(p.areaM2) || 45,
+    city: p.city || "Bogotá",
+    address: p.address || "Dirección registrada",
+    comments: p.comments || p.additionalDetails || "",
+    additionalDetails: p.additionalDetails || p.comments || "",
+    status: p.status || "Registrada",
+    assignedAdvisor: p.assignedAdvisor || null,
+    diagnosis: p.diagnosis || p.aiDiagnosis,
+    aiDiagnosis: p.aiDiagnosis || p.diagnosis,
+    quotation: p.quotation || p.formulation,
+    formulation: p.formulation || p.quotation,
     updatedAt: new Date().toISOString(),
     createdAt: p.createdAt || new Date().toISOString(),
-  });
+  };
+
+  // Update in-memory mock store
+  mockProjects.set(projectId, normalizedProject);
 
   const pool = getDbPool();
   if (pool) {
@@ -329,8 +467,8 @@ app.post("/api/db/projects", async (req, res) => {
         `INSERT INTO project_requests (
           id, client_name, client_email, client_phone, client_type,
           surface_type, environment, condition, area_m2, city,
-          comments, status, assigned_advisor, ai_diagnosis, formulation, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW())
+          comments, status, assigned_advisor, ai_diagnosis, formulation, data, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NOW())
         ON CONFLICT (id) DO UPDATE SET
           client_name = EXCLUDED.client_name,
           client_email = EXCLUDED.client_email,
@@ -346,6 +484,7 @@ app.post("/api/db/projects", async (req, res) => {
           assigned_advisor = EXCLUDED.assigned_advisor,
           ai_diagnosis = EXCLUDED.ai_diagnosis,
           formulation = EXCLUDED.formulation,
+          data = EXCLUDED.data,
           updated_at = NOW();`,
         [
           projectId,
@@ -353,16 +492,17 @@ app.post("/api/db/projects", async (req, res) => {
           clientEmail || null,
           clientPhone || null,
           clientType,
-          p.surfaceType || 'Pared',
-          p.environment || 'Interior',
-          p.condition || 'Nuevo',
-          p.areaM2 || 0,
-          p.city || 'Bogotá',
-          p.comments || null,
-          p.status || 'Registrada',
-          p.assignedAdvisor || null,
-          JSON.stringify(p.aiDiagnosis || null),
-          JSON.stringify(p.formulation || null),
+          normalizedProject.surfaceType,
+          normalizedProject.environment,
+          normalizedProject.condition,
+          normalizedProject.areaM2,
+          normalizedProject.city,
+          normalizedProject.comments || null,
+          normalizedProject.status,
+          normalizedProject.assignedAdvisor || null,
+          JSON.stringify(normalizedProject.diagnosis || null),
+          JSON.stringify(normalizedProject.quotation || null),
+          JSON.stringify(normalizedProject),
         ]
       );
     } catch (err: any) {

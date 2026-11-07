@@ -3,7 +3,7 @@ import { ProjectRequest, QuotationItem, UserProfile } from '../types';
 import { ColorSelectorModal, ColorSelectionResult } from './ColorSelectorModal';
 import { AddProductModal } from './AddProductModal';
 import { getProjectPhaseLockInfo } from '../lib/projectStatusRules';
-import { sendProjectStatusNotification } from '../services/renderDbService';
+import { sendProjectStatusNotification, fetchProjectsFromDb } from '../services/renderDbService';
 import { APP_IMAGES } from '../assets/images';
 import {
   Calendar,
@@ -37,6 +37,7 @@ import {
   Lock,
   ShoppingBag,
   ArrowRight,
+  RefreshCw,
 } from 'lucide-react';
 
 interface ProjectStatusScreenProps {
@@ -48,6 +49,7 @@ interface ProjectStatusScreenProps {
   onNavigateToAdvisorPortal?: () => void;
   onUpdateProject?: (updatedRequest: ProjectRequest) => void;
   onNavigateToStore?: () => void;
+  onSelectProject?: (project: ProjectRequest) => void;
 }
 
 export const ProjectStatusScreen: React.FC<ProjectStatusScreenProps> = ({
@@ -59,18 +61,99 @@ export const ProjectStatusScreen: React.FC<ProjectStatusScreenProps> = ({
   onNavigateToAdvisorPortal,
   onUpdateProject,
   onNavigateToStore,
+  onSelectProject,
 }) => {
+  // Client projects state from PostgreSQL database
+  const [clientProjects, setClientProjects] = useState<ProjectRequest[]>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(request?.id || null);
+  const [isLoadingProjects, setIsLoadingProjects] = useState<boolean>(false);
+  const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
+
+  // Sync selectedProjectId when incoming request prop changes
+  useEffect(() => {
+    if (request?.id) {
+      setSelectedProjectId(request.id);
+    }
+  }, [request?.id]);
+
+  // Fetch client projects from Render PostgreSQL backend
+  const loadClientProjects = async (showFullLoading = true) => {
+    if (showFullLoading) setIsLoadingProjects(true);
+    setIsRefreshing(true);
+    try {
+      const allProjects = await fetchProjectsFromDb();
+      if (allProjects && Array.isArray(allProjects)) {
+        const isAdvisor = Boolean(
+          currentUser?.role &&
+            (currentUser.role.includes('Técnico') ||
+              currentUser.role.includes('Asesor') ||
+              currentUser.role.includes('Administrador') ||
+              currentUser.role.includes('Pintuco'))
+        );
+
+        let filtered: ProjectRequest[] = [];
+        if (isAdvisor) {
+          filtered = allProjects;
+        } else if (currentUser?.email) {
+          const userEmailLower = currentUser.email.toLowerCase().trim();
+          filtered = allProjects.filter((p: any) => {
+            const clientEmail = (p.client?.email || p.clientEmail || '').toLowerCase().trim();
+            return clientEmail === userEmailLower;
+          });
+        }
+
+        // If request prop exists and isn't in filtered, prepend it
+        if (request && !filtered.some((p) => p.id === request.id)) {
+          filtered = [request, ...filtered];
+        }
+
+        setClientProjects(filtered);
+
+        // If no selected project yet or active ID not found, select first
+        if (filtered.length > 0) {
+          if (!selectedProjectId || !filtered.some((p) => p.id === selectedProjectId)) {
+            setSelectedProjectId(filtered[0].id);
+            if (onSelectProject) {
+              onSelectProject(filtered[0]);
+            }
+          }
+        }
+      } else if (request) {
+        setClientProjects([request]);
+      }
+    } catch (err) {
+      console.warn('Error loading client projects:', err);
+      if (request) {
+        setClientProjects([request]);
+      }
+    } finally {
+      setIsLoadingProjects(false);
+      setIsRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
+    loadClientProjects(true);
+  }, [currentUser?.email]);
+
+  // Active project is either the selected project from DB, or the passed request, or first in clientProjects
+  const activeRequest: ProjectRequest | null =
+    clientProjects.find((p) => p.id === selectedProjectId) ||
+    (request && (!selectedProjectId || request.id === selectedProjectId) ? request : null) ||
+    clientProjects[0] ||
+    request;
+
   // Photos Gallery state - incorporates user project photo if uploaded
   const photos = [
     {
       id: 0,
-      title: request?.surfaceType ? `Superficie: ${request.surfaceType}` : 'Espacio Principal Sala & Comedor',
+      title: activeRequest?.surfaceType ? `Superficie: ${activeRequest.surfaceType}` : 'Espacio Principal Sala & Comedor',
       label: 'Inspección Digital de Superficie',
       url:
-        request?.photoUrl ||
+        activeRequest?.photoUrl ||
         APP_IMAGES.wallInspection,
       caption:
-        request?.diagnosis?.diagnosticSummary ||
+        activeRequest?.diagnosis?.diagnosticSummary ||
         'Evaluación técnica: Muros secos sin eflorescencia. Apto para sistema de recubrimientos Pintuco.',
     },
     {
@@ -85,14 +168,14 @@ export const ProjectStatusScreen: React.FC<ProjectStatusScreenProps> = ({
       title: 'Calibración Color',
       label: '2. Calibración Color',
       url: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCdXgBhm2w_EMg5MzqHS1o8jVdgmfF7KmsDm6BTBIqulag2XkoOCuCatihXherprhq7U4WQ4Y2Wk5rAYnjxLCozjza5BJ5LAmLZrXYPv4fdYPtq3ff7x63jjWa496VgOs4is-Q9dWGspAuw8WCUIGUZPNwjXq4VEV81QVt1_rAucjPklkbR2po6nhfOeYt1shL3PAJ6xDh3yQsUaRmO4YSQE5ZGmTq4_ErmMl9iwCEdJ8mQAad9E2b1mQ',
-      caption: `Pruebas de tono y calibración espectrofotométrica según cartas de color Pintuco: ${request?.colorFamily || 'Arena Cálido'}.`,
+      caption: `Pruebas de tono y calibración espectrofotométrica según cartas de color Pintuco: ${activeRequest?.colorFamily || 'Arena Cálido'}.`,
     },
     {
       id: 3,
       title: 'Perímetro Total',
       label: '3. Perímetro Total',
       url: 'https://lh3.googleusercontent.com/aida-public/AB6AXuDMQ9cZmvQGEnFasKkYdMkA0-lkX4UhgoW8junLqn8HnbfIPxQ4RIDipxYlUWIxn3UzAnlnksoCpeNRTRLh8s8_oXnbY1tQqeIg0nxkCOayLAcW7V6ExYmrpKknveqZ4utpB_MXhaorN_jZYkCXaBw7FdOezU1IfQpyVpQV1-e1XkmRnHiLGLRYAiNFYcOZIFIkF-DRa99XLa8YJibqxsiKfyZhQ3ZigF3N4VjHl3LPoYlpB7r2U5sVuw',
-      caption: `Levantamiento perimetral con descuento de vanos, puertas y ventanería: ${request?.areaM2 || 45} m² netos.`,
+      caption: `Levantamiento perimetral con descuento de vanos, puertas y ventanería: ${activeRequest?.areaM2 || 45} m² netos.`,
     },
   ];
 
@@ -142,36 +225,38 @@ export const ProjectStatusScreen: React.FC<ProjectStatusScreenProps> = ({
   ];
 
   const [projectItems, setProjectItems] = useState<QuotationItem[]>(
-    request?.quotation?.items && request.quotation.items.length > 0
-      ? request.quotation.items
+    activeRequest?.quotation?.items && activeRequest.quotation.items.length > 0
+      ? activeRequest.quotation.items
       : defaultItems
   );
 
   const [isAddProductModalOpen, setIsAddProductModalOpen] = useState(false);
   const [colorModalTargetIndex, setColorModalTargetIndex] = useState<number | null>(null);
 
-  // Sync when request changes
+  // Sync when activeRequest changes
   useEffect(() => {
-    if (request?.quotation?.items && request.quotation.items.length > 0) {
-      setProjectItems(request.quotation.items);
+    if (activeRequest?.quotation?.items && activeRequest.quotation.items.length > 0) {
+      setProjectItems(activeRequest.quotation.items);
+    } else {
+      setProjectItems(defaultItems);
     }
-  }, [request?.quotation?.items]);
+  }, [activeRequest?.id, activeRequest?.quotation?.items]);
 
   // Sync project update helper
   const syncProjectUpdate = (newItems: QuotationItem[]) => {
-    if (!request) return;
+    if (!activeRequest) return;
     const subtotal = newItems.reduce((acc, it) => acc + (it.totalCOP || 0), 0);
     const discount = Math.round(subtotal * 0.05);
     const tax = Math.round((subtotal - discount) * 0.19);
-    const labor = request.quotation?.laborEstimateCOP || Math.round((request.areaM2 || 45) * 6500);
+    const labor = activeRequest.quotation?.laborEstimateCOP || Math.round((activeRequest.areaM2 || 45) * 6500);
     const total = subtotal - discount + tax + labor;
 
     const updatedRequest: ProjectRequest = {
-      ...request,
+      ...activeRequest,
       quotation: {
-        quoteNumber: request.quotation?.quoteNumber || `COT-PT-${new Date().getFullYear()}-01`,
-        date: request.quotation?.date || new Date().toLocaleDateString('es-CO'),
-        validUntil: request.quotation?.validUntil || '15 días',
+        quoteNumber: activeRequest.quotation?.quoteNumber || `COT-PT-${new Date().getFullYear()}-01`,
+        date: activeRequest.quotation?.date || new Date().toLocaleDateString('es-CO'),
+        validUntil: activeRequest.quotation?.validUntil || '15 días',
         items: newItems,
         subtotalCOP: subtotal,
         discountCOP: discount,
@@ -179,10 +264,14 @@ export const ProjectStatusScreen: React.FC<ProjectStatusScreenProps> = ({
         laborEstimateCOP: labor,
         logisticsCOP: 0,
         totalCOP: total,
-        paymentTerms: request.quotation?.paymentTerms || 'Crédito Corporativo 30 días / PSE',
-        estimatedLeadDays: request.quotation?.estimatedLeadDays || 2,
+        paymentTerms: activeRequest.quotation?.paymentTerms || 'Crédito Corporativo 30 días / PSE',
+        estimatedLeadDays: activeRequest.quotation?.estimatedLeadDays || 2,
       },
     };
+
+    setClientProjects((prev) =>
+      prev.map((p) => (p.id === updatedRequest.id ? updatedRequest : p))
+    );
 
     if (onUpdateProject) {
       onUpdateProject(updatedRequest);
@@ -190,11 +279,11 @@ export const ProjectStatusScreen: React.FC<ProjectStatusScreenProps> = ({
   };
 
   // Derived project values or fallbacks matching mockup
-  const projectCode = request?.id || 'PTC-2024-8924';
-  const projectCity = request?.city ? `${request.city}, Colombia` : 'Bogotá, D.C.';
-  const projectAddress = request?.address || 'Calle 127 # 19-45, Apto 402, Bogotá';
-  const projectArea = request?.areaM2 || 45;
-  const currentStatus = request?.status || 'Cotizada';
+  const projectCode = activeRequest?.id || 'PTC-2024-8924';
+  const projectCity = activeRequest?.city ? `${activeRequest.city}, Colombia` : 'Bogotá, D.C.';
+  const projectAddress = activeRequest?.address || 'Calle 127 # 19-45, Apto 402, Bogotá';
+  const projectArea = activeRequest?.areaM2 || 45;
+  const currentStatus = activeRequest?.status || 'Cotizada';
   const lockInfo = getProjectPhaseLockInfo(currentStatus);
 
   // Add product handler (strictly blocked in production/logistics/completed phases)
@@ -249,24 +338,24 @@ export const ProjectStatusScreen: React.FC<ProjectStatusScreenProps> = ({
     }).format(val);
   };
 
-  const createdAtFormatted = request?.createdAt
-    ? new Date(request.createdAt).toLocaleDateString('es-CO', {
+  const createdAtFormatted = activeRequest?.createdAt
+    ? new Date(activeRequest.createdAt).toLocaleDateString('es-CO', {
         day: 'numeric',
         month: 'short',
         year: 'numeric',
       })
     : '12 May 2024';
 
-  const requiredDateFormatted = request?.requiredDate
-    ? new Date(request.requiredDate).toLocaleDateString('es-CO', {
+  const requiredDateFormatted = activeRequest?.requiredDate
+    ? new Date(activeRequest.requiredDate).toLocaleDateString('es-CO', {
         day: 'numeric',
         month: 'short',
         year: 'numeric',
       })
     : '28 May 2024';
 
-  const projectTitle = request?.surfaceType
-    ? `Diagnóstico Técnico y Suministro de Recubrimientos para ${request.surfaceType} - ${request.city}`
+  const projectTitle = activeRequest?.surfaceType
+    ? `Diagnóstico Técnico y Suministro de Recubrimientos para ${activeRequest.surfaceType} - ${activeRequest.city}`
     : 'Diagnóstico Técnico y Suministro de Recubrimientos - Sala Principal y Comedor';
 
   // Lifecycle stage mapping
@@ -350,34 +439,37 @@ export const ProjectStatusScreen: React.FC<ProjectStatusScreenProps> = ({
       console.warn('Acción bloqueada: solo los asesores técnicos de Pintuco pueden avanzar el estado del proyecto.');
       return;
     }
-    if (!request) return;
+    if (!activeRequest) return;
     const now = new Date();
     const updated: ProjectRequest = {
-      ...request,
+      ...activeRequest,
       status: newStatus,
       trackingNumber:
         newStatus === 'Completada'
-          ? request.trackingNumber || `PTC-TRK-${Math.floor(100000 + Math.random() * 900000)}`
-          : request.trackingNumber,
+          ? activeRequest.trackingNumber || `PTC-TRK-${Math.floor(100000 + Math.random() * 900000)}`
+          : activeRequest.trackingNumber,
       assignedCarrier:
         newStatus === 'Completada'
-          ? request.assignedCarrier || 'Flota Logística Pintuco Express'
-          : request.assignedCarrier,
+          ? activeRequest.assignedCarrier || 'Flota Logística Pintuco Express'
+          : activeRequest.assignedCarrier,
       deliveryDate:
         newStatus === 'Completada'
-          ? request.deliveryDate || now.toLocaleDateString('es-CO')
-          : request.deliveryDate,
+          ? activeRequest.deliveryDate || now.toLocaleDateString('es-CO')
+          : activeRequest.deliveryDate,
       approvedAt:
         newStatus === 'Inventario Asignado' || newStatus === 'En Producción'
-          ? request.approvedAt || now.toISOString()
-          : request.approvedAt,
+          ? activeRequest.approvedAt || now.toISOString()
+          : activeRequest.approvedAt,
       completedAt:
         newStatus === 'Completada'
-          ? request.completedAt || now.toISOString()
-          : request.completedAt,
+          ? activeRequest.completedAt || now.toISOString()
+          : activeRequest.completedAt,
     };
 
     const previousStatus = currentStatus;
+    setClientProjects((prev) =>
+      prev.map((p) => (p.id === updated.id ? updated : p))
+    );
     if (onUpdateProject) {
       onUpdateProject(updated);
     }
@@ -385,8 +477,25 @@ export const ProjectStatusScreen: React.FC<ProjectStatusScreenProps> = ({
     sendProjectStatusNotification(updated, newStatus, previousStatus);
   };
 
+  // Loading state when checking database
+  if (isLoadingProjects && clientProjects.length === 0 && !activeRequest) {
+    return (
+      <div className="w-full max-w-4xl mx-auto px-4 md:px-8 py-20 text-center">
+        <div className="bg-white rounded-3xl p-10 border border-[#ebe2cf] shadow-xs flex flex-col items-center justify-center gap-4">
+          <RefreshCw className="w-10 h-10 text-[#ffd100] animate-spin" />
+          <p className="text-base font-bold text-[#1f1b10]">
+            Consultando tus solicitudes de proyecto en Pintuco ColorLink...
+          </p>
+          <p className="text-xs text-[#7f765f]">
+            Sincronizando con la base de datos PostgreSQL de Render.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   // If no project has been submitted by the real user yet, show a clean informative empty state
-  if (!request) {
+  if (!activeRequest) {
     return (
       <div className="w-full max-w-4xl mx-auto px-4 md:px-8 py-16 text-center">
         <div className="bg-white rounded-3xl p-8 sm:p-12 shadow-sm border border-[#ebe2cf] space-y-6">
@@ -420,6 +529,14 @@ export const ProjectStatusScreen: React.FC<ProjectStatusScreenProps> = ({
                 <span>Comprar en Tienda Directa</span>
               </button>
             )}
+            <button
+              type="button"
+              onClick={() => loadClientProjects(true)}
+              className="w-full sm:w-auto px-6 py-3.5 rounded-full bg-[#f6eddb] hover:bg-[#ede0c8] text-[#4d4632] text-sm font-bold flex items-center justify-center gap-2 cursor-pointer transition-all"
+            >
+              <RefreshCw className="w-4 h-4" />
+              <span>Comprobar Estado</span>
+            </button>
           </div>
         </div>
       </div>
@@ -429,7 +546,7 @@ export const ProjectStatusScreen: React.FC<ProjectStatusScreenProps> = ({
   return (
     <div className="w-full max-w-7xl mx-auto px-4 md:px-8 py-6 md:py-10">
       {/* Top Highlight Bar / Breadcrumb Micro-layer */}
-      <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
+      <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
         <div className="flex items-center gap-2 text-xs font-semibold text-[#4d4632]">
           <button
             onClick={onNavigateToRequest}
@@ -448,13 +565,121 @@ export const ProjectStatusScreen: React.FC<ProjectStatusScreenProps> = ({
           <span className="text-[#725c00] font-bold">Seguimiento de Proyecto</span>
         </div>
 
-        <div className="flex items-center gap-2 bg-[#f0e7d5] px-3 py-1.5 rounded-full border border-[#d1c6ab]/40">
-          <span className="w-2.5 h-2.5 rounded-full bg-[#ffd100] animate-pulse"></span>
-          <span className="text-[11px] text-[#1f1b10] font-bold tracking-wider uppercase">
-            Actualizado en tiempo real
-          </span>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => loadClientProjects(false)}
+            disabled={isRefreshing}
+            className="flex items-center gap-1.5 text-xs font-bold text-[#4d4632] hover:text-[#1f1b10] bg-[#f6eddb] hover:bg-[#ede0c8] px-3 py-1.5 rounded-full border border-[#d1c6ab]/50 transition-colors cursor-pointer"
+            title="Refrescar solicitudes desde PostgreSQL"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-[#725c00]' : 'text-[#725c00]'}`} />
+            <span>Refrescar</span>
+          </button>
+          <div className="flex items-center gap-2 bg-[#f0e7d5] px-3 py-1.5 rounded-full border border-[#d1c6ab]/40">
+            <span className="w-2.5 h-2.5 rounded-full bg-[#ffd100] animate-pulse"></span>
+            <span className="text-[11px] text-[#1f1b10] font-bold tracking-wider uppercase">
+              Actualizado en tiempo real
+            </span>
+          </div>
         </div>
       </div>
+
+      {/* Client's Requests Selector Strip (when client has registered requests) */}
+      {clientProjects.length > 0 && (
+        <div className="bg-white rounded-2xl border border-[#ebe2cf] p-4 sm:p-5 mb-6 shadow-xs">
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-[#ffd100]"></span>
+              <h3 className="text-sm sm:text-base font-black text-[#1f1b10]">
+                Tus Solicitudes de Proyecto ({clientProjects.length})
+              </h3>
+              {isRefreshing && (
+                <span className="text-xs text-[#7f765f] flex items-center gap-1 animate-pulse">
+                  <RefreshCw className="w-3 h-3 animate-spin text-[#ffd100]" /> Actualizando...
+                </span>
+              )}
+            </div>
+            <button
+              onClick={onNavigateToRequest}
+              className="inline-flex items-center gap-1.5 text-xs font-bold text-[#6f5a00] bg-[#ffd100] hover:bg-[#ffc800] px-3 py-1.5 rounded-lg transition-colors cursor-pointer shadow-2xs"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Nueva Solicitud</span>
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {clientProjects.map((proj) => {
+              const isSelected = proj.id === activeRequest.id;
+              const projStatus = proj.status || 'Registrada';
+              const statusColor =
+                projStatus === 'Completada'
+                  ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                  : projStatus === 'En Producción' || projStatus === 'Aprobada QA'
+                  ? 'bg-blue-100 text-blue-800 border-blue-300'
+                  : projStatus === 'Inventario Asignado'
+                  ? 'bg-teal-100 text-teal-800 border-teal-300'
+                  : 'bg-amber-100 text-amber-900 border-amber-300';
+
+              const formattedDate = proj.createdAt
+                ? new Date(proj.createdAt).toLocaleDateString('es-CO', {
+                    day: 'numeric',
+                    month: 'short',
+                    year: 'numeric',
+                  })
+                : 'Reciente';
+
+              return (
+                <button
+                  key={proj.id}
+                  type="button"
+                  onClick={() => {
+                    setSelectedProjectId(proj.id);
+                    if (onSelectProject) onSelectProject(proj);
+                  }}
+                  className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-2 relative ${
+                    isSelected
+                      ? 'bg-[#fffcf4] border-[#ffd100] ring-2 ring-[#ffd100]/40 shadow-xs'
+                      : 'bg-[#faf6ee] hover:bg-[#f5eedf] border-[#e2d8c3]'
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-black text-[#1f1b10] tracking-wide">
+                        {proj.id}
+                      </span>
+                      {isSelected && (
+                        <span className="w-2 h-2 rounded-full bg-[#ffd100]"></span>
+                      )}
+                    </div>
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md border ${statusColor}`}>
+                      {projStatus}
+                    </span>
+                  </div>
+
+                  <div className="space-y-0.5">
+                    <p className="text-xs font-bold text-[#1f1b10] line-clamp-1">
+                      {proj.surfaceType ? `${proj.surfaceType} • ${proj.city}` : proj.city || 'Superficie General'}
+                    </p>
+                    <p className="text-[11px] text-[#7f765f] flex items-center justify-between">
+                      <span>{proj.areaM2 ? `${proj.areaM2} m²` : 'Área por definir'}</span>
+                      <span>{formattedDate}</span>
+                    </p>
+                  </div>
+
+                  {proj.quotation?.totalCOP ? (
+                    <div className="pt-1 border-t border-[#e2d8c3]/60 flex items-center justify-between text-xs font-black text-[#1f1b10]">
+                      <span className="text-[10px] text-[#7f765f] font-medium">Cotización:</span>
+                      <span>{formatCOP(proj.quotation.totalCOP)}</span>
+                    </div>
+                  ) : null}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Project Header Section */}
       <div className="bg-white rounded-2xl shadow-xs border border-[#ebe2cf] p-6 md:p-8 mb-8 relative overflow-hidden">
@@ -491,7 +716,7 @@ export const ProjectStatusScreen: React.FC<ProjectStatusScreenProps> = ({
                 <span>
                   {currentStatus === 'Completada' ? 'Entregado en Obra: ' : 'Finalización estimada: '}
                   <strong className="text-[#1f1b10] font-bold">
-                    {currentStatus === 'Completada' ? (request?.deliveryDate || 'Hoy') : requiredDateFormatted}
+                    {currentStatus === 'Completada' ? (activeRequest?.deliveryDate || 'Hoy') : requiredDateFormatted}
                   </strong>
                 </span>
               </div>
@@ -553,7 +778,7 @@ export const ProjectStatusScreen: React.FC<ProjectStatusScreenProps> = ({
               {currentStatus === 'Aprobada QA' &&
                 'El lote cumple con Delta E < 0.5 y pruebas ASTM. Procede a despachar con la flota logística de Pintuco.'}
               {currentStatus === 'Completada' &&
-                `Transporte finalizado con guía ${request?.trackingNumber || 'PTC-TRK-892401'}. El certificado de garantía de 5 años está emitido.`}
+                `Transporte finalizado con guía ${activeRequest?.trackingNumber || 'PTC-TRK-892401'}. El certificado de garantía de 5 años está emitido.`}
             </p>
           </div>
 
@@ -694,7 +919,7 @@ export const ProjectStatusScreen: React.FC<ProjectStatusScreenProps> = ({
               <span>El avance y certificación de cada fase técnica es gestionado exclusivamente por los asesores técnicos de Pintuco.</span>
             </div>
             <span className="font-mono text-[11px] text-[#4d4632]">
-              Asesor: {request?.assignedAdvisor || 'Ingeniería & Asesoría Técnica Pintuco'}
+              Asesor: {activeRequest?.assignedAdvisor || 'Ingeniería & Asesoría Técnica Pintuco'}
             </span>
           </div>
         )}
@@ -1410,18 +1635,18 @@ export const ProjectStatusScreen: React.FC<ProjectStatusScreenProps> = ({
                 <div className="p-4 rounded-xl bg-white border border-emerald-200 space-y-2 text-xs">
                   <div className="flex justify-between">
                     <span className="text-[#4d4632]">Fecha de Entrega:</span>
-                    <strong className="text-[#1f1b10]">{request?.deliveryDate || 'Hoy'}</strong>
+                    <strong className="text-[#1f1b10]">{activeRequest?.deliveryDate || 'Hoy'}</strong>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-[#4d4632]">Guía de Transporte:</span>
                     <strong className="font-mono text-[#2f5ea1]">
-                      {request?.trackingNumber || 'PTC-TRK-892401'}
+                      {activeRequest?.trackingNumber || 'PTC-TRK-892401'}
                     </strong>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-[#4d4632]">Transportador Asignado:</span>
                     <strong className="text-[#1f1b10]">
-                      {request?.assignedCarrier || 'Flota Logística Pintuco Express'}
+                      {activeRequest?.assignedCarrier || 'Flota Logística Pintuco Express'}
                     </strong>
                   </div>
                   <div className="flex justify-between">
@@ -1771,10 +1996,10 @@ export const ProjectStatusScreen: React.FC<ProjectStatusScreenProps> = ({
                     Titular del Proyecto
                   </span>
                   <strong className="text-base text-[#1f1b10]">
-                    {request?.client?.fullName || 'Cliente Pintuco'}
+                    {activeRequest?.client?.fullName || 'Cliente Pintuco'}
                   </strong>
                   <p className="text-xs text-[#4d4632] mt-0.5">
-                    {request?.client?.documentType}: {request?.client?.documentNumber}
+                    {activeRequest?.client?.documentType}: {activeRequest?.client?.documentNumber}
                   </p>
                 </div>
                 <div className="sm:text-right">
@@ -1785,7 +2010,7 @@ export const ProjectStatusScreen: React.FC<ProjectStatusScreenProps> = ({
                     {projectCode}
                   </strong>
                   <p className="text-xs text-[#7f765f] mt-0.5">
-                    Guía: {request?.trackingNumber || 'PTC-TRK-892401'}
+                    Guía: {activeRequest?.trackingNumber || 'PTC-TRK-892401'}
                   </p>
                 </div>
               </div>
@@ -1798,7 +2023,7 @@ export const ProjectStatusScreen: React.FC<ProjectStatusScreenProps> = ({
                 <div className="p-3 rounded-xl bg-white border border-[#ebe2cf]">
                   <span className="text-[#7f765f] block">Fecha de Despacho & Entrega:</span>
                   <strong className="text-[#1f1b10]">
-                    {request?.deliveryDate || new Date().toLocaleDateString('es-CO')}
+                    {activeRequest?.deliveryDate || new Date().toLocaleDateString('es-CO')}
                   </strong>
                 </div>
               </div>
