@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { ProjectRequest } from '../../types';
 import { AdvisorStatusModal, ValidProjectStatus } from './AdvisorStatusModal';
+import { sendProjectStatusNotification } from '../../services/renderDbService';
 import {
   Search,
   Filter,
@@ -139,6 +140,8 @@ export const AdvisorRequestsView: React.FC<AdvisorRequestsViewProps> = ({
     if (onUpdateProject) {
       onUpdateProject(updated);
     }
+    // Asynchronously send project status update email to the customer
+    sendProjectStatusNotification(updated, newStatus, statusModalRequest.status);
     onShowToast(`Estado del expediente ${updated.id} actualizado a: "${newStatus}"`);
     setStatusModalRequest(null);
   };

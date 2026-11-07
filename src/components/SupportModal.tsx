@@ -26,6 +26,18 @@ interface ResendStatusData {
   rawKeyMasked: string;
   sender: string;
   hasCustomDomain: boolean;
+  accountEmail?: string;
+  note: string;
+}
+
+interface SmtpStatusData {
+  isConfigured: boolean;
+  isGmail: boolean;
+  service?: string;
+  userMasked: string;
+  sender: string;
+  host: string;
+  port: number | string;
   note: string;
 }
 
@@ -42,8 +54,12 @@ export const SupportModal: React.FC<SupportModalProps> = ({ isOpen, onClose, cur
 
   // Email diagnostic
   const [resendStatus, setResendStatus] = useState<ResendStatusData | null>(null);
+  const [smtpStatus, setSmtpStatus] = useState<SmtpStatusData | null>(null);
+  const [canSendToAnyEmail, setCanSendToAnyEmail] = useState<boolean>(false);
+  const [activeMode, setActiveMode] = useState<string>('');
   const [testEmail, setTestEmail] = useState(currentUser?.email || 'Stivengamer1803@gmail.com');
   const [isTestingEmail, setIsTestingEmail] = useState(false);
+  const [showGmailInstructions, setShowGmailInstructions] = useState(false);
   const [testResult, setTestResult] = useState<{
     success: boolean;
     message: string;
@@ -52,15 +68,16 @@ export const SupportModal: React.FC<SupportModalProps> = ({ isOpen, onClose, cur
     diagnostic?: string;
   } | null>(null);
 
-  // Load Resend status
+  // Load email configuration status
   const fetchStatus = async () => {
     try {
       const res = await fetch('/api/notifications/status');
       if (res.ok) {
         const data = await res.json();
-        if (data.resend) {
-          setResendStatus(data.resend);
-        }
+        if (data.resend) setResendStatus(data.resend);
+        if (data.smtp) setSmtpStatus(data.smtp);
+        setCanSendToAnyEmail(Boolean(data.canSendToAnyEmail));
+        if (data.activeMode) setActiveMode(data.activeMode);
       }
     } catch (err) {
       console.warn('Error fetching notification status:', err);
@@ -205,8 +222,8 @@ export const SupportModal: React.FC<SupportModalProps> = ({ isOpen, onClose, cur
             }`}
           >
             <Mail className="w-3.5 h-3.5 text-[#0d4788]" />
-            <span>Diagnóstico Resend</span>
-            {resendStatus?.isConfigured && (
+            <span>Servidor de Correo</span>
+            {(resendStatus?.isConfigured || smtpStatus?.isConfigured) && (
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
             )}
           </button>
@@ -348,95 +365,162 @@ export const SupportModal: React.FC<SupportModalProps> = ({ isOpen, onClose, cur
           </div>
         )}
 
-        {/* TAB 2: DIAGNÓSTICO RESEND */}
+        {/* TAB 2: DIAGNÓSTICO Y SERVIDOR DE CORREOS */}
         {activeTab === 'email_diagnostic' && (
           <div className="space-y-4">
-            {/* Status Card */}
-            <div className="p-4 rounded-2xl bg-[#f8fafc] border border-[#e2e8f0] space-y-2.5">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-[#0d4788] uppercase tracking-wider flex items-center gap-1.5">
-                  <Mail className="w-4 h-4" />
-                  Estado del Servicio Resend
-                </span>
-                <button
-                  type="button"
-                  onClick={fetchStatus}
-                  className="p-1 rounded-md text-[#7f765f] hover:text-[#0d4788] hover:bg-[#e2e8f0]"
-                  title="Refrescar estado"
-                >
-                  <RefreshCw className="w-3.5 h-3.5" />
-                </button>
+            {/* Universal Capability Status Banner */}
+            <div
+              className={`p-3.5 rounded-2xl border text-xs leading-relaxed flex items-start gap-3 ${
+                canSendToAnyEmail
+                  ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                  : 'bg-amber-50 border-amber-200 text-amber-900'
+              }`}
+            >
+              <div
+                className={`w-7 h-7 rounded-xl flex items-center justify-center shrink-0 mt-0.5 ${
+                  canSendToAnyEmail ? 'bg-emerald-200 text-emerald-800' : 'bg-amber-200 text-amber-800'
+                }`}
+              >
+                {canSendToAnyEmail ? (
+                  <CheckCircle2 className="w-4 h-4" />
+                ) : (
+                  <AlertTriangle className="w-4 h-4" />
+                )}
               </div>
-
-              <div className="grid grid-cols-2 gap-2 text-xs">
-                <div className="p-2.5 rounded-xl bg-white border border-[#e2e8f0]">
-                  <span className="text-[#64748b] block text-[10px]">API Key Resend</span>
-                  <span className="font-bold text-[#0f172a] truncate block">
-                    {resendStatus?.isConfigured ? (
-                      <span className="text-emerald-700 flex items-center gap-1">
-                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 inline" />
-                        Detectada ({resendStatus.rawKeyMasked})
-                      </span>
-                    ) : resendStatus?.isDummy ? (
-                      <span className="text-amber-700 flex items-center gap-1">
-                        <AlertTriangle className="w-3.5 h-3.5 text-amber-600 inline" />
-                        Placeholder de prueba
-                      </span>
-                    ) : (
-                      <span className="text-rose-700">No configurada</span>
-                    )}
-                  </span>
+              <div className="flex-1">
+                <div className="font-black text-sm mb-0.5">
+                  {canSendToAnyEmail
+                    ? '✅ Envíos a CUALQUIER Correo Habilitados'
+                    : '⚡ Modo Sandbox Resend Activo'}
                 </div>
-
-                <div className="p-2.5 rounded-xl bg-white border border-[#e2e8f0]">
-                  <span className="text-[#64748b] block text-[10px]">Remitente (From)</span>
-                  <span className="font-bold text-[#0f172a] truncate block text-[11px]" title={resendStatus?.sender}>
-                    {resendStatus?.sender || 'onboarding@resend.dev'}
-                  </span>
-                </div>
+                {canSendToAnyEmail ? (
+                  <p>
+                    El sistema está configurado para entregar correos directamente a <strong>cualquier destinatario externo</strong> ({activeMode}).
+                  </p>
+                ) : (
+                  <p>
+                    Con el remitente gratuito <code>onboarding@resend.dev</code>, Resend restringe el envío al correo del desarrollador (<code>{resendStatus?.accountEmail || 'Stivengamer1803@gmail.com'}</code>). Por eso, todas las notificaciones a clientes, cotizaciones y facturas <strong>te llegan a tu bandeja de entrada con el prefijo <code>[Para: cliente@...]</code></strong> para que las audites sin perder ninguna información.
+                  </p>
+                )}
               </div>
+            </div>
 
-              {/* Informative Note */}
-              <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900 leading-relaxed flex items-start gap-2">
-                <Info className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
-                <div>
-                  <div className="font-bold text-amber-950 mb-0.5">
-                    {resendStatus?.isConfigured
-                      ? '¿Cómo funciona el envío con Resend?'
-                      : '¿Por qué aún no envía correos reales?'}
-                  </div>
-                  {resendStatus?.isDummy ? (
-                    <p>
-                      La variable <code>RESEND_API_KEY</code> tiene asignado un valor de prueba temporal (<code>re_1234...</code>). Para que los correos lleguen a tu bandeja de entrada real, copia tu API Key obtenida en{' '}
-                      <a
-                        href="https://resend.com/api-keys"
-                        target="_blank"
-                        rel="noreferrer"
-                        className="font-bold underline text-amber-950 inline-flex items-center gap-0.5"
-                      >
-                        resend.com/api-keys <ExternalLink className="w-3 h-3" />
-                      </a>{' '}
-                      y pégala en el archivo <code>.env</code>.
-                    </p>
-                  ) : !resendStatus?.hasCustomDomain ? (
-                    <p>
-                      En el plan gratuito de Resend con el remitente <code>onboarding@resend.dev</code>, Resend <strong>únicamente entrega correos al correo con el que te registraste en Resend</strong>. Si envías a un correo diferente, Resend bloqueará el mensaje hasta que verifiques un dominio en{' '}
-                      <a
-                        href="https://resend.com/domains"
-                        target="_blank"
-                        rel="noreferrer"
-                        className="font-bold underline text-amber-950 inline-flex items-center gap-0.5"
-                      >
-                        resend.com/domains <ExternalLink className="w-3 h-3" />
-                      </a>.
-                    </p>
-                  ) : (
-                    <p>
-                      Dominio verificado activo. Los correos se enviarán directamente a cualquier destinatario a través de Resend.
-                    </p>
+            {/* Providers Status Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+              {/* Resend Status */}
+              <div className="p-3 rounded-2xl bg-[#f8fafc] border border-[#e2e8f0] space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-[#0d4788] uppercase text-[10px] tracking-wider flex items-center gap-1">
+                    <Mail className="w-3.5 h-3.5" />
+                    Resend API
+                  </span>
+                  {resendStatus?.isConfigured && (
+                    <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
+                      Conectado
+                    </span>
                   )}
                 </div>
+                <div className="text-[11px] text-[#475569]">
+                  API Key: <strong>{resendStatus?.rawKeyMasked || 'No configurada'}</strong>
+                </div>
+                <div className="text-[11px] text-[#475569] truncate" title={resendStatus?.sender}>
+                  Remitente: <strong>{resendStatus?.sender || 'onboarding@resend.dev'}</strong>
+                </div>
+                <div className="text-[10px] text-[#64748b] pt-1 border-t border-[#e2e8f0]">
+                  {resendStatus?.hasCustomDomain
+                    ? 'Dominio propio verificado'
+                    : 'Sandbox de prueba (Relay a cuenta registrado)'}
+                </div>
               </div>
+
+              {/* SMTP / Gmail Status */}
+              <div className="p-3 rounded-2xl bg-[#f8fafc] border border-[#e2e8f0] space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-[#725c00] uppercase text-[10px] tracking-wider flex items-center gap-1">
+                    <Send className="w-3.5 h-3.5" />
+                    SMTP (Gmail / Otros)
+                  </span>
+                  {smtpStatus?.isConfigured ? (
+                    <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
+                      Activo
+                    </span>
+                  ) : (
+                    <span className="text-[10px] font-bold text-[#64748b] bg-[#e2e8f0] px-2 py-0.5 rounded-full">
+                      Opcional
+                    </span>
+                  )}
+                </div>
+                <div className="text-[11px] text-[#475569]">
+                  Cuenta: <strong>{smtpStatus?.userMasked || 'No configurado'}</strong>
+                </div>
+                <div className="text-[11px] text-[#475569]">
+                  Servidor: <strong>{smtpStatus?.host || 'smtp.gmail.com'}</strong>
+                </div>
+                <div className="text-[10px] text-[#64748b] pt-1 border-t border-[#e2e8f0]">
+                  {smtpStatus?.isConfigured
+                    ? 'Envía a cualquier correo sin restricciones'
+                    : 'Permite enviar a cualquier correo gratis'}
+                </div>
+              </div>
+            </div>
+
+            {/* How to enable sending to ANY email without buying a domain */}
+            <div className="p-3.5 rounded-2xl bg-white border border-[#d1c6ab] space-y-2">
+              <button
+                type="button"
+                onClick={() => setShowGmailInstructions(!showGmailInstructions)}
+                className="w-full flex items-center justify-between text-left text-xs font-bold text-[#0d4788] cursor-pointer"
+              >
+                <span className="flex items-center gap-1.5">
+                  <Info className="w-4 h-4 text-[#0d4788]" />
+                  <span>¿Cómo enviar a cualquier correo con Gmail SMTP (100% gratis)?</span>
+                </span>
+                <span className="text-[11px] underline">
+                  {showGmailInstructions ? 'Ocultar guía' : 'Ver 3 pasos'}
+                </span>
+              </button>
+
+              {showGmailInstructions && (
+                <div className="text-xs text-[#334155] space-y-2 pt-2 border-t border-[#e2e8f0] leading-relaxed">
+                  <p>
+                    Si no tienes un dominio propio para verificar en Resend, puedes usar cualquier cuenta de <strong>Gmail</strong> para despachar correos a <strong>cualquier destinatario del mundo</strong>:
+                  </p>
+                  <ol className="list-decimal pl-5 space-y-1.5 text-[11px]">
+                    <li>
+                      Entra a tu cuenta de Google en{' '}
+                      <a
+                        href="https://myaccount.google.com/security"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-[#0d4788] font-bold underline inline-flex items-center gap-0.5"
+                      >
+                        myaccount.google.com/security <ExternalLink className="w-3 h-3" />
+                      </a>{' '}
+                      y activa la <strong>Verificación en dos pasos</strong>.
+                    </li>
+                    <li>
+                      Ingresa a{' '}
+                      <a
+                        href="https://myaccount.google.com/apppasswords"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-[#0d4788] font-bold underline inline-flex items-center gap-0.5"
+                      >
+                        Contraseñas de aplicaciones <ExternalLink className="w-3 h-3" />
+                      </a>
+                      , escribe el nombre "ColorLink" y haz clic en <strong>Crear</strong>. Copia la clave de 16 letras que aparece.
+                    </li>
+                    <li>
+                      Agrega estas 3 líneas a tu archivo <code>.env</code>:
+                      <pre className="p-2 bg-[#f1f5f9] rounded-lg font-mono text-[10px] text-[#0f172a] mt-1 select-all overflow-x-auto">
+{`SMTP_SERVICE=gmail
+SMTP_USER=tu_correo@gmail.com
+SMTP_PASS=tu_clave_de_16_letras_sin_espacios`}
+                      </pre>
+                    </li>
+                  </ol>
+                </div>
+              )}
             </div>
 
             {/* Test Email Form */}
@@ -452,7 +536,7 @@ export const SupportModal: React.FC<SupportModalProps> = ({ isOpen, onClose, cur
 
               <div>
                 <label className="block mb-1 text-xs font-semibold text-[#1f1b10]">
-                  Correo Electrónico Destino (Tu cuenta de Resend):
+                  Correo Electrónico Destino a Probar:
                 </label>
                 <div className="flex gap-2">
                   <input
@@ -460,7 +544,7 @@ export const SupportModal: React.FC<SupportModalProps> = ({ isOpen, onClose, cur
                     required
                     value={testEmail}
                     onChange={(e) => setTestEmail(e.target.value)}
-                    placeholder="ejemplo@gmail.com"
+                    placeholder="ejemplo@gmail.com, cliente@empresa.com"
                     className="flex-1 rounded-xl border border-[#d1c6ab] bg-white py-2 px-3 text-xs sm:text-sm text-[#1f1b10] focus:border-[#725c00] focus:ring-1 focus:ring-[#ffd100] outline-hidden shadow-2xs"
                   />
                   <button
@@ -498,7 +582,7 @@ export const SupportModal: React.FC<SupportModalProps> = ({ isOpen, onClose, cur
                     ) : (
                       <ShieldAlert className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
                     )}
-                    <div className="space-y-1">
+                    <div className="space-y-1 flex-1">
                       <div className="font-bold">
                         {testResult.success
                           ? '¡Resultado Exitoso!'

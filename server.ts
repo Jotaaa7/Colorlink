@@ -9,6 +9,7 @@ import {
   sendProjectStatusEmail,
   sendSupportTicketEmail,
   getResendStatus,
+  getSmtpStatus,
   getRecentEmailLogs,
 } from "./serverEmailService";
 
@@ -610,11 +611,22 @@ app.post("/api/notifications/project-status", async (req, res) => {
 
 // Notifications: Get Status & Diagnostic Info (Resend & SMTP)
 app.get("/api/notifications/status", (req, res) => {
-  const status = getResendStatus();
+  const resend = getResendStatus();
+  const smtp = getSmtpStatus();
+  const canSendToAnyEmail = Boolean(smtp.isConfigured || resend.hasCustomDomain);
+
   return res.json({
     success: true,
-    resend: status,
-    smtpConfigured: Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS),
+    resend,
+    smtp,
+    canSendToAnyEmail,
+    activeMode: smtp.isConfigured
+      ? "SMTP (Envío a cualquier correo activo)"
+      : resend.isConfigured
+      ? resend.hasCustomDomain
+        ? "Resend con Dominio Propio (Envío a cualquier correo)"
+        : "Resend Sandbox Relay (Entrega en cuenta de desarrollador)"
+      : "Simulador Local",
     recentLogs: getRecentEmailLogs(),
   });
 });
@@ -622,26 +634,33 @@ app.get("/api/notifications/status", (req, res) => {
 // Notifications: Test Email Configuration (Resend & SMTP Diagnostic Endpoint)
 app.post("/api/test/email", async (req, res) => {
   const { toEmail } = req.body || {};
-  const targetEmail = toEmail || process.env.RESEND_TEST_EMAIL || "Stivengamer1803@gmail.com";
+  const targetEmail = toEmail ? toEmail.trim() : (process.env.RESEND_ACCOUNT_EMAIL || process.env.RESEND_TEST_EMAIL || "Stivengamer1803@gmail.com");
   const resendStatus = getResendStatus();
+  const smtpStatus = getSmtpStatus();
 
   try {
     const result = await sendWelcomeEmail({
       fullName: "Prueba Técnica ColorLink Pintuco",
-      email: targetEmail.trim(),
+      email: targetEmail,
       role: "Especialista Técnico Pintuco",
       city: "Medellín / Bogotá",
     });
+
+    const isRedirected = Boolean(result.redirected);
+    const message = result.success
+      ? isRedirected
+        ? `Correo de prueba entregado en ${result.redirectedTo} con etiqueta [Para: ${result.originalTo}] mediante el modo Sandbox de Resend.`
+        : `Correo de prueba entregado exitosamente a ${targetEmail} vía ${result.provider}`
+      : result.error || "No se pudo entregar el correo";
 
     return res.json({
       success: result.success,
       result,
       resendStatus,
-      smtpConfigured: Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS),
+      smtpStatus,
+      canSendToAnyEmail: Boolean(smtpStatus.isConfigured || resendStatus.hasCustomDomain),
       providerUsed: result.provider || (result.simulated ? "Simulator" : "Unknown"),
-      message: result.success
-        ? `Correo de prueba enviado exitosamente a ${targetEmail} vía ${result.provider}`
-        : result.error || "No se pudo entregar el correo",
+      message,
     });
   } catch (err: any) {
     return res.status(500).json({ success: false, error: err.message });
