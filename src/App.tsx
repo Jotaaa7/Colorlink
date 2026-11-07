@@ -11,6 +11,7 @@ import { AdvisorInventoryScreen } from './components/AdvisorInventoryScreen';
 import { DirectStoreScreen } from './components/DirectStoreScreen';
 import { ServicesModal } from './components/ServicesModal';
 import { SupportModal } from './components/SupportModal';
+import { ChatBotWidget } from './components/ChatBotWidget';
 import { Footer } from './components/Footer';
 import {
   getRemoteProjectRequests,
@@ -84,6 +85,7 @@ export default function App() {
   const [isServicesOpen, setIsServicesOpen] = useState(false);
   const [isSupportOpen, setIsSupportOpen] = useState(false);
   const [isStoreCartOpen, setIsStoreCartOpen] = useState(false);
+  const [isChatBotOpen, setIsChatBotOpen] = useState(false);
 
   // Cart count for direct store shopping
   const [cartItemsCount, setCartItemsCount] = useState<number>(() => {
@@ -556,6 +558,8 @@ export default function App() {
         onLogout={handleLogout}
         onOpenSupport={() => setIsSupportOpen(true)}
         onOpenServices={() => setIsServicesOpen(true)}
+        onOpenChatBot={() => setIsChatBotOpen((prev) => !prev)}
+        isChatBotOpen={isChatBotOpen}
       />
 
       {/* Main Content Body */}
@@ -659,6 +663,16 @@ export default function App() {
         isOpen={isSupportOpen}
         onClose={() => setIsSupportOpen(false)}
         currentUser={currentUser}
+      />
+
+      {/* Floating Service-Restricted Chatbot Assistant */}
+      <ChatBotWidget
+        currentUser={currentUser}
+        currentRequest={currentRequest}
+        isOpenExternal={isChatBotOpen}
+        onCloseExternal={() => setIsChatBotOpen(false)}
+        onOpenStore={() => setActiveTab('direct_store')}
+        onOpenNewRequest={() => setActiveTab('new_request')}
       />
     </div>
   );

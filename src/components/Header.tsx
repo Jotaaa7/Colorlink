@@ -17,6 +17,7 @@ import {
   Database,
   ShoppingBag,
   ShoppingCart,
+  Bot,
 } from 'lucide-react';
 
 interface HeaderProps {
@@ -31,6 +32,8 @@ interface HeaderProps {
   onLogout: () => void;
   onOpenSupport: () => void;
   onOpenServices: () => void;
+  onOpenChatBot?: () => void;
+  isChatBotOpen?: boolean;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -45,6 +48,8 @@ export const Header: React.FC<HeaderProps> = ({
   onLogout,
   onOpenSupport,
   onOpenServices,
+  onOpenChatBot,
+  isChatBotOpen,
 }) => {
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -94,6 +99,25 @@ export const Header: React.FC<HeaderProps> = ({
           >
             <Layers className="w-4 h-4 text-[#2f5ea1]" />
             <span className="hidden sm:inline">Servicios</span>
+          </button>
+
+          {/* ColorLink Bot Assistant Quick Launcher */}
+          <button
+            onClick={onOpenChatBot}
+            className={`px-3 py-2 rounded-xl text-sm font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+              isChatBotOpen
+                ? 'bg-[#ffd100] text-[#1f1b10] shadow-xs'
+                : 'text-[#4d4632] hover:text-[#1f1b10] hover:bg-[#f6eddb]'
+            }`}
+            id="nav-chatbot-btn"
+            title="Asesor Técnico Virtual Pintuco"
+          >
+            <Bot className="w-4 h-4 text-[#0d4788]" />
+            <span className="hidden md:inline">Chatbot IA</span>
+            <span className="md:hidden">Chat</span>
+            <span className="text-[9px] font-black px-1.5 py-0.2 rounded-full bg-[#0d4788] text-white">
+              Pintuco
+            </span>
           </button>
 
           {/* Direct Store Button (Accessible with or without an active project) */}

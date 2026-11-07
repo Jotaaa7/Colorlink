@@ -172,6 +172,10 @@ export const ColorLinkEcosystem: React.FC<ColorLinkEcosystemProps> = ({
             environment: request.environment,
             clientName: request.client.fullName,
           },
+          history: chatMessages.slice(-6).map((m) => ({
+            sender: m.sender,
+            text: m.text,
+          })),
         }),
       });
 

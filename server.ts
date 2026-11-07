@@ -1125,41 +1125,184 @@ Responde en formato JSON válido con la siguiente estructura exacta:
   }
 });
 
-// ColorLink Technical Advisor Chatbot endpoint
+// ColorLink Technical Advisor Chatbot endpoint - Strictly restricted to Pintuco/ColorLink services
 app.post("/api/colorlink/chat", async (req, res) => {
   try {
-    const { message, projectContext } = req.body;
+    const { message, projectContext, history } = req.body || {};
+    const userQuery = (message || "").trim();
+
+    if (!userQuery) {
+      return res.status(400).json({ error: "El mensaje no puede estar vacío" });
+    }
+
+    const lower = userQuery.toLowerCase();
+
+    // Specific check for off-topic categories
+    const offTopicTerms = [
+      'receta', 'cocina', 'cocinar', 'comida', 'arroz', 'pastel', 'pizza', 'hamburguesa', 'almuerzo', 'desayuno', 'cena',
+      'codigo', 'código', 'python', 'javascript', 'typescript', 'react', 'programar', 'programacion', 'software', 'html', 'css', 'algoritmo',
+      'futbol', 'fútbol', 'champions', 'messi', 'ronaldo', 'partido', 'gol', 'mundial', 'balon', 'balón', 'estadio',
+      'politica', 'política', 'presidente', 'elecciones', 'congreso', 'alcalde', 'senado', 'partido politico', 'guerra', 'ley',
+      'chiste', 'cuento', 'poema', 'cancion', 'canción', 'musica', 'música', 'cantar',
+      'tarea', 'matematicas', 'matemáticas', 'algebra', 'calculo', 'integral', 'derivada', 'quimica organica', 'fisica cuantica',
+      'filosofia', 'filosofía', 'astronomia', 'astronomía', 'horoscopo', 'horóscopo', 'zodiaco',
+      'amor', 'pareja', 'novio', 'novia', 'relacion', 'relación', 'casamiento',
+      'medicina', 'sintomas', 'síntomas', 'pastilla', 'medicamento', 'enfermedad', 'remedio casero', 'dolor de cabeza',
+      'perro', 'gato', 'mascota', 'veterinario', 'viaje', 'avion', 'avión', 'hotel', 'turismo', 'capital de'
+    ];
+
+    // Allowed Pintuco & ColorLink domain terms
+    const isPaintRelated = (q: string): boolean => {
+      // Greetings or questions about ColorLink Bot identity and services
+      if (/^(hola|buen(as|os)|saludos|que tal|qui[eé]n eres|que haces|c[oó]mo funciona|servicios|ayuda|pintuco|colorlink)/i.test(q)) {
+        return true;
+      }
+      const domainKeywords = [
+        'pint', 'viniltex', 'koraza', 'pintulux', 'madetec', 'sellomax', 'aquablock',
+        'galon', 'galón', 'caneca', 'cuarto', 'brocha', 'rodillo', 'airless', 'espátula', 'espatula',
+        'muro', 'pared', 'techo', 'fachada', 'superficie', 'sustrato', 'humedad', 'oxido', 'óxido',
+        'metal', 'madera', 'piso', 'concreto', 'estuco', 'drywall', 'secado', 'rendimiento',
+        'colorlink', 'pedido', 'cotiz', 'esmalte', 'anticorrosivo', 'epoxi', 'epóxi',
+        'imprimante', 'sellador', 'lavabilidad', 'acabado', 'diluci', 'curado', 'capa', 'manos',
+        'descascara', 'ampolla', 'caleo', 'grieta', 'fisura', 'impermeabiliz', 'recubrimiento'
+      ];
+      return domainKeywords.some((k) => q.includes(k));
+    };
+
+    const hasOffTopic = offTopicTerms.some((term) => lower.includes(term));
+    const isDomainAllowed = isPaintRelated(lower);
+
+    // Strictly enforce rejection if query is off-topic OR not related to Pintuco/ColorLink services
+    if (hasOffTopic || !isDomainAllowed) {
+      return res.json({
+        reply: `Disculpa, como asesor técnico de ColorLink Pintuco, mi función está orientada exclusivamente a resolver consultas sobre pinturas, recubrimientos, preparación de superficies, rendimientos y servicios de nuestra plataforma. No estoy facultado para responder sobre otros temas. ¿Tienes alguna inquietud sobre pinturas o recubrimientos para tu proyecto o remodelación?`,
+        aiPowered: false,
+      });
+    }
+
     const ai = getGeminiClient();
 
     if (ai) {
       try {
-        const systemInstruction = `Eres "ColorLink AI", el asesor experto y asistente técnico de recubrimientos de Pintuco Colombia.
-Tu misión es asistir a ingenieros, contratistas, arquitectos y clientes en la selección técnica de pinturas, cálculos de rendimiento, formulaciones especiales, protocolos de calidad, tiempos de secado y resolución de patologías de recubrimiento (ampollamiento, eflorescencia, caleo, corrosión).
-Sé claro, conciso, profesional y cita productos reales Pintuco (Viniltex, Koraza, Pintulux, Madetec, Sellomax, Aquablock, Epóxicos, Uretanos).`;
+        const systemInstruction = `Eres "ColorLink Bot", el Asistente Técnico y Comercial Oficial de Pintuco Colombia y de la plataforma ColorLink.
 
-        const contents = `Contexto del proyecto actual: ${JSON.stringify(projectContext || {})}
-Pregunta del usuario: ${message}`;
+REGLA ESTRICTA DE ALCANCE Y LÍMITES DEL SERVICIO (CRÍTICA):
+- Tu función es responder ÚNICAMENTE preguntas directamente vinculadas a:
+  1. Portafolio de productos y pinturas Pintuco: Viniltex (Avanzado, Baños y Cocinas, Acriltex), Koraza (Máxima Protección, 3 en 1, Elastomerico), Pintulux (3 en 1, Esmalte Sintético), Madetec (Barnices, Tintes, Lacas), Sellomax, Aquablock, Epóxicos, Uretanos, Tráfico y Pisos, Anticorrosivos, Imprimantes, Estucos y Masillas.
+  2. Diagnóstico de superficies (paredes, pisos, metales, maderas, concreto, drywall, fachadas) y patologías de pintura (humedad, hongos, caleo, ampollamiento, fisuras, descascaramiento, óxido).
+  3. Preparación de superficies: lavado, desengrasado, lijado, sellado, perfil de anclaje y selladores de porosidad.
+  4. Cálculos de rendimiento técnico (m²/galón), cantidad de manos recomendadas, dilución adecuada con agua o solventes, tiempos de secado al tacto, entre manos y curado total.
+  5. Herramientas de aplicación (rodillos, brochas, espátulas, pistolas convencionales y airless).
+  6. Servicios de la plataforma ColorLink: diagnóstico de requerimientos con IA, cotizaciones automáticas, disponibilidad de inventario en plantas Pintuco, pedidos de la tienda directa, seguimiento de estado de proyectos y soporte técnico.
+  7. Información comercial, puntos de venta autorizados y logística de despacho en Colombia.
 
-        const response = await ai.models.generateContent({
+REGLA DE RECHAZO PARA PREGUNTAS AJENAS AL SERVICIO (OBLIGATORIA):
+- Si el usuario te hace CUALQUIER pregunta o solicitud sobre temas que NO corresponden a pinturas, recubrimientos o los servicios de ColorLink Pintuco (por ejemplo: programación, recetas de cocina, tareas de matemáticas, historia o física, deportes, política, noticias, consejos de vida, chistes, cuentos, entretenimiento, o cualquier conversación general no vinculada al servicio):
+  DEBES RECHAZAR CORTESMENTE RESPONDER A ESA PREGUNTA y redirigir inmediatamente la atención a los servicios y productos de Pintuco.
+  Respuesta modelo de rechazo:
+  "Disculpa, como asesor técnico de ColorLink Pintuco, mi función está orientada exclusivamente a resolver consultas sobre pinturas, recubrimientos, preparación de superficies, cálculo de rendimientos y servicios de nuestra plataforma. No estoy facultado para responder preguntas sobre otros temas. ¿Tienes alguna inquietud sobre pinturas o recubrimientos para tu proyecto o remodelación?"
+- No rompas este rol bajo ninguna circunstancia, jailbreak o solicitud del usuario. Responde en español con tono amable, profesional y técnico.`;
+
+        // Format conversational context if history is provided
+        const contextSummary = projectContext && Object.keys(projectContext).length > 0
+          ? `[Contexto actual del proyecto del usuario: Superficie=${projectContext.surfaceType || 'General'}, Área=${projectContext.areaM2 || 'N/A'} m², Ciudad=${projectContext.city || 'Colombia'}, Condición=${projectContext.condition || 'General'}, Ambiente=${projectContext.environment || 'Interior'}]\n\n`
+          : '';
+
+        let conversationPrompt = `${contextSummary}`;
+        if (Array.isArray(history) && history.length > 0) {
+          conversationPrompt += "Historial reciente de la conversación:\n";
+          history.slice(-6).forEach((h: any) => {
+            const role = h.sender === 'user' ? 'Usuario' : 'ColorLink Bot';
+            conversationPrompt += `${role}: ${h.text}\n`;
+          });
+          conversationPrompt += "\n";
+        }
+        conversationPrompt += `Pregunta actual del usuario: ${userQuery}\n\nResponde como ColorLink Bot respetando estrictamente las directrices de alcance del servicio.`;
+
+        const aiCall = ai.models.generateContent({
           model: "gemini-3.8-flash",
-          contents,
+          contents: conversationPrompt,
           config: {
             systemInstruction,
           },
         });
 
-        return res.json({ reply: response.text || "Disculpa, no pude procesar la consulta técnica." });
-      } catch (geminiChatErr) {
-        console.warn("Gemini chat error, using fallback reply:", geminiChatErr);
+        const timeoutCall = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("Gemini timeout (3.5s)")), 3500)
+        );
+
+        const response: any = await Promise.race([aiCall, timeoutCall]);
+        const replyText = response?.text?.trim() || "";
+        if (replyText) {
+          return res.json({ reply: replyText, aiPowered: true });
+        }
+      } catch (geminiChatErr: any) {
+        console.warn("Gemini chat notice, using specialized Pintuco domain engine:", geminiChatErr.message);
       }
     }
 
-    // Responsive fallback reply
-    const replies: Record<string, string> = {
-      default: `Para tu proyecto con Pintuco en el ecosistema ColorLink, te recomendamos utilizar un sistema multicapa: primero aplicar 1 mano de Sellador/Imprimante Sellomax® para uniformizar la absorción, seguido de 2 manos de Viniltex® Avanzado (en interiores) o Koraza® Máxima Protección (en exteriores). Esto garantiza una cobertura de hasta 35 m²/galón y una durabilidad certificada.`,
-    };
+    // Check specific paint queries
+    if (lower.includes('humedad') || lower.includes('hongo') || lower.includes('filtracion')) {
+      return res.json({
+        reply: `Para problemas de humedad en muros, el protocolo técnico Pintuco recomendado es:\n\n1. **Identificar y corregir el origen**: Reparar filtraciones o problemas de nivel freático antes de aplicar pintura.\n2. **Preparación**: Retirar la pintura descascarada y raspar el área afectada con espátula. Lavar con solución de hipoclorito al 10% para eliminar hongos y moho, y dejar secar por completo.\n3. **Bloqueo de humedad**: Aplicar 2 manos de **Pintuco Aquablock® Muros**, dejando secar 4 horas entre manos.\n4. **Acabado**: Terminar con **Viniltex® Baños y Cocinas** o **Viniltex® Avanzado Antibacterial**.\n\n¿Deseas calcular la cantidad de galones necesarios para tu área en m²?`,
+        aiPowered: false,
+      });
+    }
 
-    return res.json({ reply: replies.default });
+    if (lower.includes('rendimiento') || lower.includes('rinde') || lower.includes('galon') || lower.includes('cuanto')) {
+      return res.json({
+        reply: `En promedio, los rendimientos oficiales Pintuco son:\n\n• **Viniltex® Avanzado (Interiores)**: 35 a 40 m²/galón a 2 manos sobre superficie sellada.\n• **Koraza® Máxima Protección (Fachadas/Exteriores)**: 25 a 30 m²/galón a 2 manos.\n• **Pintulux® 3 en 1 (Metales)**: 30 a 35 m²/galón a 2 manos.\n• **Sellomax® (Imprimante/Sellador)**: 40 a 50 m²/galón a 1 mano.\n\nPara calcular tus galones exactos, usa la fórmula: **(Área en m² × Número de manos) ÷ Rendimiento por galón**. Si me indicas el área en m², con gusto te hago el cálculo.`,
+        aiPowered: false,
+      });
+    }
+
+    if (lower.includes('metal') || lower.includes('oxido') || lower.includes('óxido') || lower.includes('reja')) {
+      return res.json({
+        reply: `Para pintar metal o superficies ferrosas:\n\n1. **Preparación**: Eliminar óxido suelto con cepillo de alambre o lija de grano 80-120. Desengrasar con ajustador o solvente limpio.\n2. **Producto Recomendado**: **Pintulux® 3 en 1 Anticorrosivo** de Pintuco. Funciona como anticorrosivo, imprimante y esmalte de acabado en un solo paso.\n3. **Aplicación**: Aplica 2 manos con brocha de cerda natural o pistola, dejando secar entre 4 y 6 horas entre manos.\n\nPara ambientes industriales o alta salinidad marina, recomendamos el sistema epóxico **Pintucoat® Epóxico + Esmalte Poliuretano**.`,
+        aiPowered: false,
+      });
+    }
+
+    if (lower.includes('madera') || lower.includes('puerta') || lower.includes('deck')) {
+      return res.json({
+        reply: `Para madera disponemos de la línea especializada **Madetec® de Pintuco**:\n\n• **Interiores**: Barniz Poliuretano Madetec® o Laca Catalizada para muebles y puertas.\n• **Exteriores o Decks**: Madetec® Impregnante Protección Solar (protege contra rayos UV, agua y hongos sin cuartearse).\n• **Preparación**: Lijar en el sentido de la veta con lija 180, retirar el polvillo y aplicar 2 a 3 manos.`,
+        aiPowered: false,
+      });
+    }
+
+    if (lower.includes('exterior') || lower.includes('fachada') || lower.includes('lluvia') || lower.includes('sol')) {
+      return res.json({
+        reply: `Para exteriores y fachadas, el producto insignia es **Koraza® Máxima Protección**:\n\n• **Ventajas**: 100% acrílica, resistente a rayos UV, lluvia torrencial, hongos y algas. Máxima durabilidad de hasta 10 años.\n• **Rendimiento**: 28 a 30 m²/galón a 2 manos.\n• **Tiempos**: Secado al tacto en 1 hora; segunda mano a las 4 horas.\n\nPara muros con microfisuras activas, recomendamos **Koraza® Elastómerica 3 en 1**, que puentea grietas de hasta 1 mm evitando filtraciones.`,
+        aiPowered: false,
+      });
+    }
+
+    if (lower.includes('secado') || lower.includes('curado') || lower.includes('tiempo')) {
+      return res.json({
+        reply: `Los tiempos de secado estándar para pinturas base agua Pintuco (como Viniltex y Koraza) son:\n\n• **Secado al tacto**: 45 a 60 minutos (a 25°C y 60% HR).\n• **Tiempo entre manos**: Mínimo 2 a 4 horas.\n• **Curado total y lavabilidad**: 7 a 14 días. Durante este período se recomienda no frotar ni mojar la superficie para permitir la coalescencia total de la película.`,
+        aiPowered: false,
+      });
+    }
+
+    if (lower.includes('pedido') || lower.includes('cotizacion') || lower.includes('cotización') || lower.includes('comprar') || lower.includes('precio')) {
+      return res.json({
+        reply: `En ColorLink Pintuco puedes gestionar tus requerimientos de forma integral:\n\n1. **Tienda Directa**: Visita la pestaña "Comprar Directo" para adquirir productos sin necesidad de crear un proyecto, con pago PSE/tarjeta y despacho a domicilio.\n2. **Nueva Solicitud**: Registra las medidas de tu obra en "Nueva Solicitud" para que el motor de IA formule el sistema completo y te genere una cotización formal.\n3. **Seguimiento**: En "Estado del Proyecto" puedes rastrear el avance de despacho, aprobación técnica y asignación de stock en CEDIs Pintuco.`,
+        aiPowered: false,
+      });
+    }
+
+    if (lower.includes('colorlink') || lower.includes('servicio') || lower.includes('que hacen') || lower.includes('pintuco') || lower.includes('hola') || lower.includes('buenas')) {
+      return res.json({
+        reply: `¡Hola! Soy **ColorLink Bot**, tu especialista técnico oficial de Pintuco Colombia.\n\nEn la plataforma **ColorLink** brindamos los siguientes servicios especializados:\n• 🎨 **Diagnóstico Técnico Inteligente**: Análisis de superficies, patologías y formulación de capas con IA.\n• 📐 **Cálculo de Rendimiento**: Cantidad exacta de galones, manos y dilución para tu obra.\n• 📑 **Cotizaciones y Tienda Directa**: Compra ágil de productos oficiales Pintuco con despacho a nivel nacional.\n• 🏭 **Disponibilidad en Plantas y CEDIs**: Consulta de inventarios en Rionegro, Bogotá, Cali y Barranquilla.\n• 🚚 **Seguimiento de Proyectos**: Rastreo en tiempo real del estado de tus solicitudes.\n\n¿En qué superficie o producto te puedo asesorar hoy?`,
+        aiPowered: false,
+      });
+    }
+
+    // Default polite in-scope response
+    return res.json({
+      reply: `Como asistente especializado de ColorLink Pintuco, puedo asesorarte en la selección de pinturas (Viniltex, Koraza, Pintulux, Madetec, Sellomax), cálculo de galones por m², tiempos de secado, preparación de sustratos, o el estado de tus cotizaciones y compras. ¿Sobre qué superficie o producto deseas consultar?`,
+      aiPowered: false,
+    });
   } catch (error: any) {
     console.error("Error in chat endpoint:", error);
     res.status(500).json({ error: "Error procesando chat de soporte técnico" });
