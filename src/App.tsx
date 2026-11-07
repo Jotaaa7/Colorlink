@@ -24,6 +24,7 @@ import {
   fetchProjectsFromDb,
   saveProjectToDb,
   saveUserToDb,
+  sendProjectStatusNotification,
 } from './services/renderDbService';
 
 function isAdvisorRole(role?: string): boolean {
@@ -501,6 +502,10 @@ export default function App() {
       // Persist to Render PostgreSQL database asynchronously
       saveProjectToDb(completedRequest).catch((err) =>
         console.warn('Render DB request save notice:', err)
+      );
+      // Dispatch email notification to the user
+      sendProjectStatusNotification(completedRequest, 'Registrada').catch((err) =>
+        console.warn('Project notification notice:', err)
       );
       setActiveTab('project_status');
     } catch (error) {

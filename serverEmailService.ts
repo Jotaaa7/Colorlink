@@ -367,19 +367,7 @@ async function sendOrSimulateEmail(options: {
       let targetRelay = (detectedResendAccountEmail || accountEmail).trim();
 
       const sandboxBanner = `
-        <div style="background-color: #fffbeb; border: 2px solid #f59e0b; border-radius: 12px; padding: 16px 20px; margin: 16px 20px 24px 20px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 13px; color: #78350f; line-height: 1.5; box-shadow: 0 2px 8px rgba(245, 158, 11, 0.15);">
-          <div style="font-weight: 800; font-size: 14px; margin-bottom: 6px; color: #92400e;">
-            🔔 Notificación ColorLink Pintuco (Modo Sandbox Resend)
-          </div>
-          <div>
-            Este correo fue generado para el cliente: <strong style="color: #0f172a; text-decoration: underline;">${options.to}</strong>.<br/>
-            Como tu cuenta de Resend utiliza el remitente de prueba <code>onboarding@resend.dev</code> (que restringe envíos exclusivamente a tu correo registrado), se te entregó a ti (<code>${targetRelay}</code>) para que puedas auditar la factura, proyecto o bienvenida sin errores.<br/>
-            <div style="margin-top: 8px; padding-top: 8px; border-top: 1px dashed #fcd34d; font-size: 12px; color: #b45309;">
-              🚀 <strong>¿Quieres enviar directamente a cualquier correo externo?</strong><br/>
-              Configura <strong>SMTP de Gmail</strong> en el archivo <code>.env</code> (gratuito, sin comprar dominio) o verifica un dominio en <a href="https://resend.com/domains" style="color: #0d4788; font-weight: bold;">resend.com/domains</a>.
-            </div>
-          </div>
-        </div>
+
       `;
 
       const modifiedHtml = options.html.includes('<body>')

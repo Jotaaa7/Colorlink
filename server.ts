@@ -300,13 +300,24 @@ app.get("/api/db/projects", async (req, res) => {
 // Render PostgreSQL: Upsert Project Request
 app.post("/api/db/projects", async (req, res) => {
   const p = req.body;
-  if (!p || !p.id || !p.clientName) {
+  const projectId = p?.id;
+  const clientName = p?.clientName || p?.client?.fullName;
+  const clientEmail = p?.clientEmail || p?.client?.email;
+  const clientPhone = p?.clientPhone || p?.client?.phone;
+  const clientType = p?.clientType || p?.client?.clientType || 'Particular';
+
+  if (!p || !projectId || !clientName) {
     return res.status(400).json({ success: false, error: "Datos de proyecto incompletos" });
   }
 
   // Update in-memory mock store
-  mockProjects.set(p.id, {
+  mockProjects.set(projectId, {
     ...p,
+    id: projectId,
+    clientName,
+    clientEmail,
+    clientPhone,
+    clientType,
     updatedAt: new Date().toISOString(),
     createdAt: p.createdAt || new Date().toISOString(),
   });
@@ -337,11 +348,11 @@ app.post("/api/db/projects", async (req, res) => {
           formulation = EXCLUDED.formulation,
           updated_at = NOW();`,
         [
-          p.id,
-          p.clientName,
-          p.clientEmail || null,
-          p.clientPhone || null,
-          p.clientType || 'Particular',
+          projectId,
+          clientName,
+          clientEmail || null,
+          clientPhone || null,
+          clientType,
           p.surfaceType || 'Pared',
           p.environment || 'Interior',
           p.condition || 'Nuevo',
@@ -359,7 +370,7 @@ app.post("/api/db/projects", async (req, res) => {
     }
   }
 
-  return res.json({ success: true, id: p.id });
+  return res.json({ success: true, id: projectId });
 });
 
 // Render PostgreSQL: Read & Sync Direct Orders
@@ -398,34 +409,66 @@ app.get("/api/db/orders", async (req, res) => {
 // Render PostgreSQL: Insert Direct Order with Email Invoice
 app.post("/api/db/orders", async (req, res) => {
   const o = req.body;
-  if (!o || !o.id || !o.sapOrderCode) {
-    return res.status(400).json({ success: false, error: "Datos de orden incompletos" });
+  if (!o) {
+    return res.status(400).json({ success: false, error: "Datos de orden vacíos" });
   }
 
-  // Update in-memory store
-  mockOrders.set(o.id, {
-    ...o,
-    createdAt: o.createdAt || new Date().toISOString(),
-  });
+  const orderId = o.id || o.orderId || `PED-${Date.now()}`;
+  const sapOrderCode = o.sapOrderCode || o.sapOrderNumber || `SAP-${Math.floor(100000 + Math.random() * 900000)}`;
+  const customerName = o.customerName || o.customer?.fullName || "Cliente Pintuco";
+  const customerEmail = o.customerEmail || o.customer?.email;
+  const customerPhone = o.customerPhone || o.customer?.phone || "";
+  const deliveryAddress = o.deliveryAddress || o.shipping?.address || "Dirección registrada";
+  const deliveryCity = o.deliveryCity || o.shipping?.city || "Colombia";
+  const paymentMethod = o.paymentMethod || "PSE";
+  const subtotal = Number(o.subtotal ?? o.subtotalCOP) || 0;
+  const discount = Number(o.discount) || 0;
+  const iva = Number(o.iva ?? o.taxCOP) || 0;
+  const shipping = Number(o.shipping ?? o.shippingCOP) || 0;
+  const total = Number(o.total ?? o.totalCOP) || 0;
+  const status = o.status || "Pagado y Confirmado";
+  const items = o.items || [];
 
-  // Trigger invoice email asynchronously regardless of DB mode
-  if (o.customerEmail) {
+  const normalizedOrder = {
+    id: orderId,
+    sapOrderCode,
+    customerName,
+    customerEmail,
+    customerPhone,
+    deliveryAddress,
+    deliveryCity,
+    paymentMethod,
+    subtotal,
+    discount,
+    iva,
+    shipping,
+    total,
+    status,
+    items,
+    createdAt: o.createdAt || new Date().toISOString(),
+  };
+
+  // Update in-memory store
+  mockOrders.set(orderId, normalizedOrder);
+
+  // Trigger invoice email asynchronously to customer email
+  if (customerEmail) {
     sendInvoiceEmail({
-      id: o.id,
-      sapOrderCode: o.sapOrderCode,
-      customerName: o.customerName || "Cliente Pintuco",
-      customerEmail: o.customerEmail,
-      customerPhone: o.customerPhone || "",
-      deliveryAddress: o.deliveryAddress || "Dirección registrada",
-      deliveryCity: o.deliveryCity || "Colombia",
-      paymentMethod: o.paymentMethod || "PSE",
-      subtotal: Number(o.subtotal) || 0,
-      discount: Number(o.discount) || 0,
-      iva: Number(o.iva) || 0,
-      shipping: Number(o.shipping) || 0,
-      total: Number(o.total) || 0,
-      status: o.status || "Pagado y Confirmado",
-      items: o.items || [],
+      id: orderId,
+      sapOrderCode,
+      customerName,
+      customerEmail,
+      customerPhone,
+      deliveryAddress,
+      deliveryCity,
+      paymentMethod,
+      subtotal,
+      discount,
+      iva,
+      shipping,
+      total,
+      status,
+      items,
     }).catch((err) => console.error("Error enviando factura por correo:", err));
   }
 
@@ -442,21 +485,21 @@ app.post("/api/db/orders", async (req, res) => {
           status = EXCLUDED.status,
           customer_phone = EXCLUDED.customer_phone;`,
         [
-          o.id,
-          o.sapOrderCode,
-          o.customerName || "Cliente Pintuco",
-          o.customerEmail || "",
-          o.customerPhone || "",
-          o.deliveryAddress || "",
-          o.deliveryCity || "",
-          o.paymentMethod || "PSE",
-          o.subtotal || 0,
-          o.discount || 0,
-          o.iva || 0,
-          o.shipping || 0,
-          o.total || 0,
-          o.status || "Pagado y Confirmado",
-          JSON.stringify(o.items || []),
+          orderId,
+          sapOrderCode,
+          customerName,
+          customerEmail || "",
+          customerPhone,
+          deliveryAddress,
+          deliveryCity,
+          paymentMethod,
+          subtotal,
+          discount,
+          iva,
+          shipping,
+          total,
+          status,
+          JSON.stringify(items),
         ]
       );
     } catch (err: any) {
@@ -464,7 +507,7 @@ app.post("/api/db/orders", async (req, res) => {
     }
   }
 
-  return res.json({ success: true, id: o.id, sapOrderCode: o.sapOrderCode });
+  return res.json({ success: true, id: orderId, sapOrderCode });
 });
 
 // Render PostgreSQL: Register User with Welcome Email
@@ -583,15 +626,18 @@ app.post("/api/auth/register", async (req, res) => {
 // Notifications: Send Project Status Update Email
 app.post("/api/notifications/project-status", async (req, res) => {
   const { project, previousStatus, newStatus } = req.body || {};
-  if (!project || !project.clientEmail) {
+  const clientEmail = project?.clientEmail || project?.client?.email;
+  const clientName = project?.clientName || project?.client?.fullName || "Cliente Pintuco";
+
+  if (!project || !clientEmail) {
     return res.status(400).json({ success: false, error: "Proyecto o correo de cliente no especificado" });
   }
 
   try {
     const result = await sendProjectStatusEmail({
       id: project.id,
-      clientName: project.clientName || "Cliente Pintuco",
-      clientEmail: project.clientEmail,
+      clientName,
+      clientEmail,
       surfaceType: project.surfaceType,
       city: project.city,
       status: newStatus || project.status,
