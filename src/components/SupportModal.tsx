@@ -42,6 +42,7 @@ interface SmtpStatusData {
 
 interface BrevoStatusData {
   isConfigured: boolean;
+  isSmtpKeyMistake?: boolean;
   keyMasked: string;
   senderEmail: string;
   note: string;
@@ -83,6 +84,7 @@ export const SupportModal: React.FC<SupportModalProps> = ({ isOpen, onClose, cur
   const [smtpStatus, setSmtpStatus] = useState<SmtpStatusData | null>(null);
   const [brevoStatus, setBrevoStatus] = useState<BrevoStatusData | null>(null);
   const [lastSmtpError, setLastSmtpError] = useState<SmtpDiagnosticError | null>(null);
+  const [lastBrevoError, setLastBrevoError] = useState<SmtpDiagnosticError | null>(null);
   const [canSendToAnyEmail, setCanSendToAnyEmail] = useState<boolean>(false);
   const [activeMode, setActiveMode] = useState<string>('');
   const [testEmail, setTestEmail] = useState(currentUser?.email || '');
@@ -97,6 +99,7 @@ export const SupportModal: React.FC<SupportModalProps> = ({ isOpen, onClose, cur
     previewUrl?: string;
     error?: string;
     smtpError?: string;
+    brevoError?: string;
     diagnostic?: string;
   } | null>(null);
 
@@ -110,6 +113,7 @@ export const SupportModal: React.FC<SupportModalProps> = ({ isOpen, onClose, cur
         if (data.smtp) setSmtpStatus(data.smtp);
         if (data.brevo) setBrevoStatus(data.brevo);
         setLastSmtpError(data.lastSmtpError || null);
+        setLastBrevoError(data.lastBrevoError || null);
         setCanSendToAnyEmail(Boolean(data.canSendToAnyEmail));
         if (data.activeMode) setActiveMode(data.activeMode);
         if (Array.isArray(data.recentLogs)) setRecentLogs(data.recentLogs);
@@ -198,6 +202,7 @@ export const SupportModal: React.FC<SupportModalProps> = ({ isOpen, onClose, cur
       if (data.smtpStatus) setSmtpStatus(data.smtpStatus);
       if (data.resendStatus) setResendStatus(data.resendStatus);
       setLastSmtpError(data.lastSmtpError || null);
+      setLastBrevoError(data.lastBrevoError || null);
 
       setTestResult({
         success: Boolean(data.success),
@@ -206,6 +211,7 @@ export const SupportModal: React.FC<SupportModalProps> = ({ isOpen, onClose, cur
         previewUrl: data.result?.previewUrl,
         error: data.result?.error,
         smtpError: data.result?.smtpError,
+        brevoError: data.result?.brevoError,
         diagnostic: data.result?.diagnostic,
       });
 
@@ -477,6 +483,32 @@ export const SupportModal: React.FC<SupportModalProps> = ({ isOpen, onClose, cur
               </div>
             </div>
 
+            {/* Last Brevo Diagnostic Error Alert */}
+            {(lastBrevoError || brevoStatus?.isSmtpKeyMistake) && (
+              <div className="p-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-xs text-rose-900 space-y-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-black text-rose-800 flex items-center gap-1.5">
+                    <ShieldAlert className="w-4 h-4 text-rose-600 shrink-0" />
+                    Fallo Detectado en Brevo API
+                  </span>
+                  {lastBrevoError?.timestamp && (
+                    <span className="text-[10px] text-rose-700 font-medium">
+                      {new Date(lastBrevoError.timestamp).toLocaleTimeString('es-CO', {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                    </span>
+                  )}
+                </div>
+                <p className="text-[11px] font-mono bg-white/80 px-2.5 py-1.5 rounded-lg border border-rose-200 break-words">
+                  {lastBrevoError?.error || 'BREVO_API_KEY es una clave SMTP (xsmtpsib-) en vez de API Key (xkeysib-)'}
+                </p>
+                <p className="text-[11px] leading-relaxed font-medium text-rose-900">
+                  {lastBrevoError?.hint || brevoStatus?.note}
+                </p>
+              </div>
+            )}
+
             {/* Last SMTP Diagnostic Error Alert */}
             {lastSmtpError && (
               <div className="p-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-xs text-rose-900 space-y-1.5">
@@ -510,9 +542,19 @@ export const SupportModal: React.FC<SupportModalProps> = ({ isOpen, onClose, cur
                     <Send className="w-3.5 h-3.5" />
                     Brevo (HTTPS)
                   </span>
-                  {brevoStatus?.isConfigured ? (
-                    <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
-                      Activo
+                  {brevoStatus?.isSmtpKeyMistake ? (
+                    <span className="text-[10px] font-bold text-rose-700 bg-rose-100 px-2 py-0.5 rounded-full">
+                      Clave SMTP
+                    </span>
+                  ) : brevoStatus?.isConfigured ? (
+                    <span
+                      className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                        lastBrevoError
+                          ? 'text-rose-700 bg-rose-100'
+                          : 'text-emerald-700 bg-emerald-100'
+                      }`}
+                    >
+                      {lastBrevoError ? 'Con fallo' : 'Activo'}
                     </span>
                   ) : (
                     <span className="text-[10px] font-bold text-[#64748b] bg-[#e2e8f0] px-2 py-0.5 rounded-full">
@@ -529,7 +571,7 @@ export const SupportModal: React.FC<SupportModalProps> = ({ isOpen, onClose, cur
                 <div className="text-[10px] text-[#64748b] pt-1 border-t border-[#e2e8f0]">
                   {brevoStatus?.isConfigured
                     ? 'Puerto 443 activo (Outlook/Gmail)'
-                    : 'No bloqueado en Render Free'}
+                    : 'Usa xkeysib-... + BREVO_FROM'}
                 </div>
               </div>
 
@@ -771,6 +813,11 @@ SMTP_PASS=tu_clave_de_16_letras_sin_espacios`}
                           : 'Diagnóstico de Envío Fallido'}
                       </div>
                       <p>{testResult.message}</p>
+                      {testResult.brevoError && (
+                        <p className="text-[11px] font-semibold bg-rose-50 text-rose-800 p-2 rounded-lg mt-1 border border-rose-200 break-words">
+                          Detalle fallo Brevo: {testResult.brevoError}
+                        </p>
+                      )}
                       {testResult.smtpError && (
                         <p className="text-[11px] font-semibold bg-rose-50 text-rose-800 p-2 rounded-lg mt-1 border border-rose-200 break-words">
                           Detalle fallo SMTP: {testResult.smtpError}

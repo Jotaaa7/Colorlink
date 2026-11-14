@@ -180,16 +180,22 @@ export const ChatBotWidget: React.FC<ChatBotWidgetProps> = ({
     }
   };
 
-  // Render markdown-like simple formatting for bold and bullet lists
+  // Render markdown-like simple formatting for bold, bullets, and numbered lists
   const renderFormattedText = (text: string) => {
     const paragraphs = text.split('\n');
     return paragraphs.map((line, idx) => {
-      if (!line.trim()) {
+      const trimmed = line.trim();
+      if (!trimmed) {
         return <div key={idx} className="h-1.5" />;
       }
 
-      const isBullet = line.trim().startsWith('•') || line.trim().startsWith('-');
-      const cleanLine = isBullet ? line.trim().replace(/^[•-]\s*/, '') : line;
+      const isBullet = /^[•\-*]\s+/.test(trimmed);
+      const numberedMatch = trimmed.match(/^(\d+\.)\s+(.*)$/);
+      const cleanLine = isBullet
+        ? trimmed.replace(/^[•\-*]\s+/, '')
+        : numberedMatch
+        ? numberedMatch[2]
+        : trimmed;
 
       // Parse bold segments
       const parts = cleanLine.split(/(\*\*[^*]+\*\*)/g);
@@ -208,6 +214,15 @@ export const ChatBotWidget: React.FC<ChatBotWidgetProps> = ({
         return (
           <div key={idx} className="flex items-start gap-2 my-0.5 pl-1">
             <span className="w-1.5 h-1.5 rounded-full bg-[#725c00] mt-1.5 shrink-0"></span>
+            <div className="flex-1 leading-relaxed">{formattedParts}</div>
+          </div>
+        );
+      }
+
+      if (numberedMatch) {
+        return (
+          <div key={idx} className="flex items-start gap-1.5 my-0.5 pl-1">
+            <span className="font-bold text-[#725c00] shrink-0">{numberedMatch[1]}</span>
             <div className="flex-1 leading-relaxed">{formattedParts}</div>
           </div>
         );

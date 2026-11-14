@@ -12,6 +12,7 @@ export interface EmailResult {
   previewUrl?: string;
   error?: string;
   smtpError?: string;
+  brevoError?: string;
   diagnostic?: string;
   redirected?: boolean;
   redirectedTo?: string;
@@ -126,9 +127,40 @@ export interface SmtpDiagnosticError {
 }
 
 let lastSmtpError: SmtpDiagnosticError | null = null;
+let lastBrevoError: SmtpDiagnosticError | null = null;
 
 export function getLastSmtpError(): SmtpDiagnosticError | null {
   return lastSmtpError;
+}
+
+export function getLastBrevoError(): SmtpDiagnosticError | null {
+  return lastBrevoError;
+}
+
+function extractEmailAddress(raw: string): { name?: string; email: string } {
+  const trimmed = (raw || '').trim();
+  const match = trimmed.match(/^(.*?)\s*<([^<>@\s]+@[^<>@\s]+)>$/);
+  if (match) {
+    return {
+      name: match[1].replace(/^["']|["']$/g, '').trim() || undefined,
+      email: match[2].trim(),
+    };
+  }
+  return { email: trimmed };
+}
+
+function classifyBrevoError(errMsg: string, status?: number): string {
+  const lower = (errMsg || '').toLowerCase();
+  if (status === 401 || lower.includes('unauthorized') || lower.includes('key not found') || lower.includes('api-key')) {
+    return 'BREVO_API_KEY fue rechazada (401). Asegúrate de usar una API Key v3 (empieza por xkeysib-...) de "SMTP & API → API Keys", NO una clave SMTP (xsmtpsib-...).';
+  }
+  if (lower.includes('sender') || lower.includes('unverified') || lower.includes('not valid') || status === 400) {
+    return 'Brevo rechazó el remitente (BREVO_FROM). Verifica que BREVO_FROM sea solo tu correo (ej: tu_correo@gmail.com) y esté verificado en Brevo → Senders & IP → Senders.';
+  }
+  if (lower.includes('ip') || lower.includes('whitelist')) {
+    return 'Brevo bloqueó la IP de Render por lista blanca. En Brevo → Security → Authorized IPs desactiva la restricción de IPs o autoriza la IP del servidor.';
+  }
+  return `Error enviando por Brevo (${errMsg}). Verifica BREVO_API_KEY (xkeysib-...) y que BREVO_FROM esté validado en Senders.`;
 }
 
 function classifySmtpError(errMsg: string): string {
@@ -226,6 +258,7 @@ export function getSmtpStatus(): SmtpStatusData {
 
 export interface BrevoStatusData {
   isConfigured: boolean;
+  isSmtpKeyMistake?: boolean;
   keyMasked: string;
   senderEmail: string;
   note: string;
@@ -237,20 +270,37 @@ export interface BrevoStatusData {
 export function getBrevoStatus(): BrevoStatusData {
   dotenv.config({ override: true });
   const apiKey = (process.env.BREVO_API_KEY || '').trim();
-  const senderEmail = (
+  const rawSender = (
     process.env.BREVO_FROM ||
     process.env.SMTP_USER ||
     ''
   ).trim();
-  const isConfigured = Boolean(apiKey && apiKey.length >= 16 && senderEmail.includes('@'));
+  const parsedSender = extractEmailAddress(rawSender);
+  const senderEmail = parsedSender.email;
+  const isSmtpKeyMistake = apiKey.startsWith('xsmtpsib-');
+  const isConfigured = Boolean(apiKey && apiKey.length >= 16 && senderEmail.includes('@') && !isSmtpKeyMistake);
+
+  let note =
+    'Alternativa recomendada para Render Free Tier: Brevo envía por HTTPS (puerto 443) a Outlook y cualquier correo usando solo tu Gmail verificado gratis (sin comprar dominio).';
+
+  if (isSmtpKeyMistake) {
+    note =
+      'Detectamos que BREVO_API_KEY empieza por "xsmtpsib-" (clave SMTP). Para la API HTTPS debes crear una clave en Brevo → SMTP & API → pestaña "API Keys" (empieza por "xkeysib-...").';
+  } else if (apiKey && !senderEmail.includes('@')) {
+    note =
+      'Falta configurar BREVO_FROM (ej: tu_correo@gmail.com) con el correo verificado en Brevo → Senders.';
+  } else if (!apiKey && senderEmail.includes('@') && process.env.BREVO_FROM) {
+    note = 'Falta configurar BREVO_API_KEY (empieza por xkeysib-...) en las variables de entorno.';
+  } else if (isConfigured) {
+    note = `Brevo HTTPS API activo con remitente ${senderEmail}. Envía por puerto 443 a Outlook, Hotmail y cualquier dominio sin bloqueo de puertos SMTP.`;
+  }
 
   return {
     isConfigured,
-    keyMasked: apiKey ? `${apiKey.slice(0, 8)}...${apiKey.slice(-4)}` : 'No configurada',
+    isSmtpKeyMistake,
+    keyMasked: apiKey ? `${apiKey.slice(0, 9)}...${apiKey.slice(-4)}` : 'No configurada',
     senderEmail: senderEmail || 'No configurado',
-    note: isConfigured
-      ? `Brevo HTTPS API activo con remitente ${senderEmail}. Envía por puerto 443 a Outlook, Hotmail y cualquier dominio sin bloqueo de puertos SMTP.`
-      : 'Alternativa recomendada para Render Free Tier: Brevo envía por HTTPS (puerto 443) a Outlook y cualquier correo usando solo tu Gmail verificado gratis (sin comprar dominio).',
+    note,
   };
 }
 
@@ -390,10 +440,22 @@ async function sendOrSimulateEmail(options: {
   const normalizedTarget = options.to.trim().toLowerCase();
   const isTargetAccountOwner = Boolean(accountEmail && normalizedTarget === accountEmail.toLowerCase());
   let currentSmtpError: string | undefined;
+  let currentBrevoError: string | undefined;
 
   // 0. BREVO HTTPS API (Port 443 - never blocked by Render Free Tier, sends directly to Outlook/Hotmail/Gmail)
-  if (brevoStatus.isConfigured) {
+  if (brevoStatus.isSmtpKeyMistake) {
+    const hint = brevoStatus.note;
+    currentBrevoError = `Clave SMTP usada en lugar de API Key — ${hint}`;
+    lastBrevoError = {
+      timestamp: new Date().toISOString(),
+      error: 'BREVO_API_KEY empieza por xsmtpsib- (debe ser xkeysib-...)',
+      hint,
+    };
+  } else if (brevoStatus.isConfigured) {
     try {
+      const parsedFrom = extractEmailAddress(
+        (process.env.BREVO_FROM || process.env.SMTP_USER || '').trim()
+      );
       const brevoRes = await fetch('https://api.brevo.com/v3/smtp/email', {
         method: 'POST',
         headers: {
@@ -401,10 +463,11 @@ async function sendOrSimulateEmail(options: {
           'Content-Type': 'application/json',
           Accept: 'application/json',
         },
+        signal: AbortSignal.timeout(7000),
         body: JSON.stringify({
           sender: {
-            name: 'ColorLink Pintuco',
-            email: brevoStatus.senderEmail,
+            name: parsedFrom.name || 'ColorLink Pintuco',
+            email: parsedFrom.email,
           },
           to: [{ email: options.to }],
           subject: options.subject,
@@ -415,6 +478,7 @@ async function sendOrSimulateEmail(options: {
 
       const brevoData: any = await brevoRes.json().catch(() => ({}));
       if (brevoRes.ok && brevoData?.messageId) {
+        lastBrevoError = null;
         console.log(`✅ [BREVO HTTPS API SENT] Enviado a ${options.to} con ID: ${brevoData.messageId}`);
         emailLogs.push({
           id: `log-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
@@ -435,8 +499,15 @@ async function sendOrSimulateEmail(options: {
           diagnostic: `Correo enviado a ${options.to} mediante Brevo API`,
         };
       } else {
-        const brevoErr = brevoData?.message || `HTTP ${brevoRes.status}`;
-        console.warn(`⚠️ [BREVO NOTICE] ${brevoErr}`);
+        const brevoErr = brevoData?.message || brevoData?.code || `HTTP ${brevoRes.status}`;
+        const hint = classifyBrevoError(brevoErr, brevoRes.status);
+        currentBrevoError = `${brevoErr} — ${hint}`;
+        lastBrevoError = {
+          timestamp: new Date().toISOString(),
+          error: `HTTP ${brevoRes.status}: ${brevoErr}`,
+          hint,
+        };
+        console.warn(`⚠️ [BREVO NOTICE] HTTP ${brevoRes.status}: ${brevoErr}`);
         emailLogs.push({
           id: `log-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
           timestamp: new Date().toISOString(),
@@ -444,12 +515,30 @@ async function sendOrSimulateEmail(options: {
           subject: options.subject,
           provider: 'Brevo',
           success: false,
-          error: brevoErr,
-          diagnostic: `Fallo en Brevo API: ${brevoErr}`,
+          error: `HTTP ${brevoRes.status}: ${brevoErr}`,
+          diagnostic: hint,
         });
       }
     } catch (brevoEx: any) {
-      console.warn(`⚠️ [BREVO EXCEPTION] ${brevoEx.message}`);
+      const errMsg = brevoEx?.message || 'Excepción de red conectando a Brevo';
+      const hint = classifyBrevoError(errMsg);
+      currentBrevoError = `${errMsg} — ${hint}`;
+      lastBrevoError = {
+        timestamp: new Date().toISOString(),
+        error: errMsg,
+        hint,
+      };
+      console.warn(`⚠️ [BREVO EXCEPTION] ${errMsg}`);
+      emailLogs.push({
+        id: `log-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        timestamp: new Date().toISOString(),
+        to: options.to,
+        subject: options.subject,
+        provider: 'Brevo',
+        success: false,
+        error: errMsg,
+        diagnostic: hint,
+      });
     }
   }
 
@@ -649,9 +738,11 @@ async function sendOrSimulateEmail(options: {
             redirectedTo: targetRelay,
             originalTo: options.to,
             smtpError: currentSmtpError,
-            diagnostic: currentSmtpError
-              ? `SMTP falló (${currentSmtpError}). Resend Sandbox redirigió el correo a ${targetRelay}.`
-              : `Notificación entregada vía Resend Sandbox (destinatario original: ${options.to}).`,
+            brevoError: currentBrevoError,
+            diagnostic:
+              currentBrevoError || currentSmtpError
+                ? `${currentBrevoError ? `Brevo falló (${currentBrevoError}). ` : ''}${currentSmtpError ? `SMTP falló (${currentSmtpError}). ` : ''}Resend Sandbox redirigió el correo a ${targetRelay}.`
+                : `Notificación entregada vía Resend Sandbox (destinatario original: ${options.to}).`,
           };
         }
       } catch (relayErr: any) {
@@ -693,7 +784,12 @@ async function sendOrSimulateEmail(options: {
         provider: 'Ethereal',
         messageId: info.messageId,
         previewUrl,
-        diagnostic: `Correo enviado por SMTP Ethereal (vista previa disponible). Para entrega en bandeja real, configura SMTP_USER y SMTP_PASS en .env.`,
+        smtpError: currentSmtpError,
+        brevoError: currentBrevoError,
+        diagnostic:
+          currentBrevoError || currentSmtpError
+            ? `${currentBrevoError ? `Brevo falló (${currentBrevoError}). ` : ''}${currentSmtpError ? `SMTP falló (${currentSmtpError}). ` : ''}Se envió por Ethereal de respaldo.`
+            : `Correo enviado por SMTP Ethereal (vista previa disponible). Para entrega en bandeja real, configura BREVO_API_KEY + BREVO_FROM o SMTP_USER + SMTP_PASS.`,
       };
     } catch (etherealErr: any) {
       console.warn('⚠️ [ETHEREAL SEND NOTICE]:', etherealErr.message);
