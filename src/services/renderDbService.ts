@@ -179,13 +179,18 @@ export interface RegisterUserData {
 export interface AuthResponse {
   success: boolean;
   user?: any;
+  email?: string;
+  requiresVerification?: boolean;
+  verified?: boolean;
   emailResult?: EmailDeliveryResult;
+  welcomeEmailResult?: EmailDeliveryResult;
+  message?: string;
   error?: string;
   fallback?: boolean;
 }
 
 /**
- * Registers a new user directly in Render PostgreSQL (triggers welcome email)
+ * Registers a new user directly in Render PostgreSQL (triggers verification email)
  */
 export async function registerUserInDb(userData: RegisterUserData): Promise<AuthResponse> {
   try {
@@ -206,6 +211,67 @@ export async function registerUserInDb(userData: RegisterUserData): Promise<Auth
 }
 
 /**
+ * Confirms registration with 6-digit verification code sent by email
+ */
+export async function verifyRegistrationInDb(email: string, code: string): Promise<AuthResponse> {
+  try {
+    const res = await fetch('/api/auth/verify-registration', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, code }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      return { success: false, error: data.error || 'Código de verificación inválido o expirado' };
+    }
+    return data;
+  } catch (err: any) {
+    console.warn('[Auth] Error verificando registro:', err);
+    return { success: false, error: 'Error de conexión al verificar el registro' };
+  }
+}
+
+/**
+ * Resends the registration confirmation email
+ */
+export async function resendVerificationInDb(
+  email: string
+): Promise<{ success: boolean; alreadyVerified?: boolean; message?: string; error?: string; emailResult?: EmailDeliveryResult }> {
+  try {
+    const res = await fetch('/api/auth/resend-verification', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      return { success: false, error: data.error || 'No se pudo reenviar el correo de verificación' };
+    }
+    return data;
+  } catch (err: any) {
+    console.warn('[Auth] Error reenviando verificación:', err);
+    return { success: false, error: 'Error de conexión al reenviar la verificación' };
+  }
+}
+
+/**
+ * Checks whether a pending account was confirmed (e.g. via one-click link in email)
+ */
+export async function checkRegistrationVerificationStatus(email: string): Promise<AuthResponse> {
+  try {
+    const res = await fetch('/api/auth/verification-status', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    });
+    const data = await res.json();
+    return data;
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
+/**
  * Authenticates user credentials against Render PostgreSQL
  */
 export async function loginUserInDb(email: string, password?: string): Promise<AuthResponse> {
@@ -217,7 +283,12 @@ export async function loginUserInDb(email: string, password?: string): Promise<A
     });
     const data = await res.json();
     if (!res.ok) {
-      return { success: false, error: data.error || 'Credenciales inválidas' };
+      return {
+        success: false,
+        requiresVerification: Boolean(data.requiresVerification),
+        email: data.email,
+        error: data.error || 'Credenciales inválidas',
+      };
     }
     return data;
   } catch (err: any) {

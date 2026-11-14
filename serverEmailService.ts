@@ -24,6 +24,15 @@ export interface PasswordResetEmailData {
   expiresMinutes: number;
 }
 
+export interface RegistrationVerificationEmailData {
+  fullName: string;
+  email: string;
+  code: string;
+  verificationUrl?: string;
+  role?: string;
+  expiresMinutes: number;
+}
+
 export interface UserEmailData {
   fullName: string;
   email: string;
@@ -1098,4 +1107,88 @@ export async function sendPasswordResetEmail(data: PasswordResetEmailData): Prom
     text: `Tu código de recuperación ColorLink Pintuco es: ${data.code} (válido por ${data.expiresMinutes} minutos).`,
   });
 }
+
+/**
+ * 6. Registration Email Verification (OTP Code + One-Click Confirmation Link)
+ */
+export async function sendRegistrationVerificationEmail(
+  data: RegistrationVerificationEmailData
+): Promise<EmailResult> {
+  const subject = `Confirma tu registro en ColorLink Pintuco: Código ${data.code} ✅`;
+  const appUrl = process.env.APP_URL || 'https://colorlink.onrender.com';
+  const confirmUrl = data.verificationUrl || appUrl;
+
+  const html = `
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${subject}</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; margin: 0; padding: 0; background-color: #f4f6f8; color: #1f2937; }
+    .container { max-width: 600px; margin: 20px auto; background: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.06); border: 1px solid #e5e7eb; }
+    .header { background: linear-gradient(135deg, #0d4788 0%, #173663 100%); padding: 32px 24px; text-align: center; }
+    .badge { display: inline-block; background-color: #ffd100; color: #0d4788; font-weight: 800; font-size: 11px; padding: 4px 12px; border-radius: 9999px; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 12px; }
+    .brand-title { color: #ffffff; font-size: 24px; font-weight: 900; margin: 0; }
+    .content { padding: 32px 28px; line-height: 1.6; }
+    .code-box { background: #fffbeb; border: 2px dashed #eab308; border-radius: 14px; padding: 24px; text-align: center; margin: 24px 0; }
+    .code-digits { font-family: monospace; font-size: 36px; font-weight: 900; letter-spacing: 8px; color: #0d4788; margin: 8px 0; }
+    .cta-container { text-align: center; margin: 24px 0 12px 0; }
+    .cta-button { display: inline-block; background-color: #ffd100; color: #0d4788; font-weight: 900; font-size: 14px; padding: 14px 30px; border-radius: 10px; text-decoration: none; text-transform: uppercase; letter-spacing: 0.5px; }
+    .footer { background-color: #f1f5f9; padding: 24px; text-align: center; font-size: 12px; color: #64748b; border-top: 1px solid #e2e8f0; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <span class="badge">Verificación de Cuenta ColorLink</span>
+      <h1 class="brand-title">Confirma tu Registro</h1>
+    </div>
+
+    <div class="content">
+      <p style="font-size: 16px; color: #0f172a; margin-top: 0;">
+        Hola <strong>${data.fullName}</strong>,
+      </p>
+      <p style="color: #475569; font-size: 14px;">
+        ¡Gracias por registrarte en <strong>ColorLink Pintuco</strong>${data.role ? ` como <strong>${data.role}</strong>` : ''}! Para activar tu cuenta (${data.email}), confirma tu dirección de correo electrónico ingresando el siguiente código de verificación o haciendo clic en el botón de confirmación:
+      </p>
+
+      <div class="code-box">
+        <div style="font-size: 11px; font-weight: 800; color: #854d0e; text-transform: uppercase; letter-spacing: 0.08em;">
+          Código de Verificación de Registro
+        </div>
+        <div class="code-digits">${data.code}</div>
+        <div style="font-size: 12px; color: #64748b;">
+          Válido durante <strong>${data.expiresMinutes} minutos</strong>
+        </div>
+      </div>
+
+      ${data.verificationUrl ? `
+      <div class="cta-container">
+        <a href="${confirmUrl}" class="cta-button">Confirmar Mi Registro</a>
+      </div>` : ''}
+
+      <p style="color: #475569; font-size: 12px; margin-top: 20px;">
+        Una vez confirmes tu correo, tu acceso quedará habilitado y recibirás tu correo de bienvenida oficial de Pintuco ColorLink. Si no creaste esta cuenta, puedes ignorar este mensaje.
+      </p>
+    </div>
+
+    <div class="footer">
+      <p style="margin: 0 0 6px 0; font-weight: bold; color: #0d4788;">Pintuco Colombia S.A.S. • ColorLink Pro</p>
+      <p style="margin: 0;">Línea Técnica Nacional: 01 8000 111 247</p>
+    </div>
+  </div>
+</body>
+</html>
+`;
+
+  return sendOrSimulateEmail({
+    to: data.email,
+    subject,
+    html,
+    text: `Confirma tu registro en ColorLink Pintuco con el código: ${data.code} (válido por ${data.expiresMinutes} minutos).${data.verificationUrl ? ` También puedes confirmar aquí: ${data.verificationUrl}` : ''}`,
+  });
+}
+
 

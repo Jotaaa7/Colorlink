@@ -25,6 +25,9 @@ import {
 import {
   registerUserInDb,
   loginUserInDb,
+  verifyRegistrationInDb,
+  resendVerificationInDb,
+  checkRegistrationVerificationStatus,
   requestPasswordReset,
   confirmPasswordReset,
   EmailDeliveryResult,
@@ -130,6 +133,15 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   const [regEmailResult, setRegEmailResult] = useState<EmailDeliveryResult | null>(null);
   const [pendingCreatedUser, setPendingCreatedUser] = useState<UserProfile | null>(null);
 
+  // Registration Email Verification States
+  const [pendingVerifyEmail, setPendingVerifyEmail] = useState<string | null>(null);
+  const [pendingVerifyPassword, setPendingVerifyPassword] = useState<string>('');
+  const [verifyCodeInput, setVerifyCodeInput] = useState('');
+  const [verifyError, setVerifyError] = useState('');
+  const [verifyInfoMsg, setVerifyInfoMsg] = useState('');
+  const [verifyLoading, setVerifyLoading] = useState(false);
+  const [verifyEmailResult, setVerifyEmailResult] = useState<EmailDeliveryResult | null>(null);
+
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError('');
@@ -146,6 +158,20 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
       const res = await loginUserInDb(loginEmail.trim(), loginPassword);
       if (res.success && res.user) {
         onLoginSuccess(res.user);
+        setIsSubmitting(false);
+        return;
+      }
+
+      if (res.requiresVerification) {
+        setPendingVerifyEmail((res.email || loginEmail).trim());
+        setPendingVerifyPassword(loginPassword);
+        setVerifyCodeInput('');
+        setVerifyError('');
+        setVerifyInfoMsg(
+          res.error || 'Tu cuenta requiere confirmación por correo antes de iniciar sesión.'
+        );
+        setVerifyEmailResult(null);
+        setMode('register');
         setIsSubmitting(false);
         return;
       }
@@ -266,6 +292,17 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
         return;
       }
 
+      if (dbResponse.requiresVerification) {
+        setPendingVerifyEmail(dbResponse.email || userData.email);
+        setPendingVerifyPassword(regPassword);
+        setVerifyCodeInput('');
+        setVerifyError('');
+        setVerifyInfoMsg('');
+        setVerifyEmailResult(dbResponse.emailResult || null);
+        setIsSubmitting(false);
+        return;
+      }
+
       const createdUser: UserProfile = dbResponse.user || {
         ...userData,
         createdAt: new Date().toISOString().split('T')[0],
@@ -299,6 +336,108 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
       console.error('Registration error:', err);
       setRegError(err.message || 'Error de conexión al registrar usuario');
       setIsSubmitting(false);
+    }
+  };
+
+  const completeVerifiedRegistration = (verifiedUser: UserProfile, welcomeEmail?: EmailDeliveryResult | null) => {
+    try {
+      const localList = JSON.parse(localStorage.getItem('colorlink_registered_users') || '[]');
+      const filtered = localList.filter(
+        (u: any) => u.email?.toLowerCase() !== verifiedUser.email.toLowerCase()
+      );
+      filtered.push({
+        ...verifiedUser,
+        ...(pendingVerifyPassword ? { password: pendingVerifyPassword } : {}),
+      });
+      localStorage.setItem('colorlink_registered_users', JSON.stringify(filtered));
+    } catch {
+      // ignore
+    }
+
+    const welcomeNote = welcomeEmail?.success
+      ? ` Correo de bienvenida enviado (${welcomeEmail.provider || 'SMTP'}).`
+      : '';
+
+    setPendingVerifyEmail(null);
+    setRegEmailResult(welcomeEmail || null);
+    setPendingCreatedUser(verifiedUser);
+    setRegSuccessMsg(`¡Registro confirmado y activado exitosamente!${welcomeNote} Iniciando sesión...`);
+
+    const delayMs = welcomeEmail?.previewUrl ? 2200 : 900;
+    setTimeout(() => {
+      onLoginSuccess(verifiedUser);
+    }, delayMs);
+  };
+
+  const handleConfirmVerificationCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!pendingVerifyEmail) return;
+    setVerifyError('');
+    setVerifyInfoMsg('');
+
+    if (verifyCodeInput.trim().length < 6) {
+      setVerifyError('Ingresa el código de verificación de 6 dígitos enviado a tu correo.');
+      return;
+    }
+
+    setVerifyLoading(true);
+    try {
+      const res = await verifyRegistrationInDb(pendingVerifyEmail, verifyCodeInput.trim());
+      if (!res.success || !res.user) {
+        setVerifyError(res.error || 'El código es incorrecto o ha expirado.');
+        return;
+      }
+      completeVerifiedRegistration(res.user, res.welcomeEmailResult || null);
+    } catch (err: any) {
+      setVerifyError(err.message || 'Error al verificar el código.');
+    } finally {
+      setVerifyLoading(false);
+    }
+  };
+
+  const handleResendVerification = async () => {
+    if (!pendingVerifyEmail) return;
+    setVerifyError('');
+    setVerifyInfoMsg('');
+    setVerifyLoading(true);
+    try {
+      const res = await resendVerificationInDb(pendingVerifyEmail);
+      if (!res.success) {
+        setVerifyError(res.error || 'No se pudo reenviar el correo.');
+        return;
+      }
+      if (res.alreadyVerified) {
+        const statusRes = await checkRegistrationVerificationStatus(pendingVerifyEmail);
+        if (statusRes.verified && statusRes.user) {
+          completeVerifiedRegistration(statusRes.user, null);
+          return;
+        }
+      }
+      setVerifyEmailResult(res.emailResult || null);
+      setVerifyInfoMsg(`Nuevo código de verificación enviado a ${pendingVerifyEmail}.`);
+    } catch (err: any) {
+      setVerifyError(err.message || 'Error reenviando verificación.');
+    } finally {
+      setVerifyLoading(false);
+    }
+  };
+
+  const handleCheckLinkVerification = async () => {
+    if (!pendingVerifyEmail) return;
+    setVerifyError('');
+    setVerifyInfoMsg('');
+    setVerifyLoading(true);
+    try {
+      const statusRes = await checkRegistrationVerificationStatus(pendingVerifyEmail);
+      if (statusRes.verified && statusRes.user) {
+        completeVerifiedRegistration(statusRes.user, null);
+      } else {
+        setVerifyError('Tu correo aún aparece pendiente. Ingresa el código de 6 dígitos o haz clic en el botón del correo.');
+      }
+    } catch (err: any) {
+      setVerifyError(err.message || 'No se pudo comprobar el estado.');
+    } finally {
+      setVerifyLoading(false);
     }
   };
 
@@ -658,6 +797,140 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
           {/* ===================== MODE: REGISTRARSE ===================== */}
           {mode === 'register' && (
             <div className="space-y-6">
+              {pendingVerifyEmail ? (
+                <section className="bg-white rounded-2xl p-6 sm:p-8 shadow-xs border border-[#ebe2cf] space-y-5">
+                  <div className="flex items-center gap-3">
+                    <div className="w-11 h-11 rounded-full bg-[#ffd100] flex items-center justify-center text-[#0d4788] shadow-xs shrink-0">
+                      <Mail className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h2 className="text-xl sm:text-2xl font-bold text-[#1f1b10] leading-tight">
+                        Confirma tu Correo Electrónico
+                      </h2>
+                      <p className="text-xs sm:text-sm text-[#7f765f]">
+                        Último paso para activar tu cuenta en Pintuco ColorLink
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-900 space-y-2">
+                    <div className="flex items-center gap-2 font-bold">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                      <span>
+                        Enviamos un correo de verificación a <strong>{pendingVerifyEmail}</strong>
+                        {verifyEmailResult?.provider ? ` (${verifyEmailResult.provider})` : ''}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-emerald-800 leading-relaxed">
+                      Revisa tu bandeja de entrada e ingresa el <strong>código de 6 dígitos</strong> o haz clic en <strong>&quot;Confirmar Mi Registro&quot;</strong> dentro del correo.
+                    </p>
+                    {verifyEmailResult?.redirected && verifyEmailResult?.redirectedTo && (
+                      <p className="text-[11px] text-amber-800">
+                        Sandbox activo: redirigido a <strong>{verifyEmailResult.redirectedTo}</strong>.
+                      </p>
+                    )}
+                    {verifyEmailResult?.previewUrl && (
+                      <a
+                        href={verifyEmailResult.previewUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-emerald-300 text-[#0d4788] font-bold text-[11px] hover:bg-[#fff8f0]"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                        <span>Abrir correo de verificación (Vista previa)</span>
+                      </a>
+                    )}
+                  </div>
+
+                  {verifyInfoMsg && (
+                    <div className="p-3 rounded-xl bg-sky-50 border border-sky-200 text-xs text-sky-900 flex items-center gap-2">
+                      <Mail className="w-4 h-4 shrink-0 text-sky-600" />
+                      <span>{verifyInfoMsg}</span>
+                    </div>
+                  )}
+
+                  {verifyError && (
+                    <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-800 flex items-center gap-2">
+                      <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+                      <span>{verifyError}</span>
+                    </div>
+                  )}
+
+                  <form onSubmit={handleConfirmVerificationCode} className="space-y-4">
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label htmlFor="verifyCodeInput" className="text-xs sm:text-sm font-semibold text-[#1f1b10]">
+                          Código de verificación (6 dígitos) *
+                        </label>
+                        <button
+                          type="button"
+                          disabled={verifyLoading}
+                          onClick={handleResendVerification}
+                          className="text-xs font-bold text-[#725c00] hover:underline inline-flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                        >
+                          <RefreshCw className="w-3.5 h-3.5" />
+                          <span>Reenviar correo</span>
+                        </button>
+                      </div>
+                      <input
+                        id="verifyCodeInput"
+                        type="text"
+                        inputMode="numeric"
+                        maxLength={6}
+                        required
+                        value={verifyCodeInput}
+                        onChange={(e) => setVerifyCodeInput(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                        placeholder="000000"
+                        className="w-full rounded-xl border border-[#d1c6ab] bg-white py-3.5 px-4 text-center font-mono tracking-[0.45em] text-2xl font-black text-[#0d4788] focus:border-[#725c00] focus:ring-2 focus:ring-[#ffd100] outline-hidden"
+                      />
+                    </div>
+
+                    <div className="flex flex-col sm:flex-row gap-3 pt-1">
+                      <button
+                        type="submit"
+                        disabled={verifyLoading}
+                        className="flex-1 bg-[#ffd100] hover:bg-[#ffc800] text-[#1f1b10] font-bold text-sm py-3.5 px-6 rounded-full shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                      >
+                        {verifyLoading ? (
+                          <>
+                            <div className="w-4 h-4 border-2 border-[#1f1b10] border-t-transparent rounded-full animate-spin" />
+                            <span>Confirmando registro...</span>
+                          </>
+                        ) : (
+                          <>
+                            <CheckCircle2 className="w-4 h-4" />
+                            <span>Confirmar Registro e Ingresar</span>
+                          </>
+                        )}
+                      </button>
+
+                      <button
+                        type="button"
+                        disabled={verifyLoading}
+                        onClick={handleCheckLinkVerification}
+                        className="px-5 py-3.5 rounded-full border border-[#d1c6ab] text-xs font-bold text-[#0d4788] hover:bg-[#f6eddb] transition-colors cursor-pointer disabled:opacity-50"
+                      >
+                        Ya confirmé en el enlace
+                      </button>
+                    </div>
+                  </form>
+
+                  <div className="pt-3 border-t border-[#ebe2cf] flex items-center justify-between text-xs text-[#7f765f]">
+                    <span>¿El correo es incorrecto o quieres volver?</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPendingVerifyEmail(null);
+                        setVerifyError('');
+                        setVerifyInfoMsg('');
+                      }}
+                      className="font-bold text-[#725c00] hover:underline cursor-pointer"
+                    >
+                      Editar datos de registro
+                    </button>
+                  </div>
+                </section>
+              ) : (
               <form onSubmit={handleRegisterSubmit} className="space-y-6" id="register-form">
                 {/* Section: Perfil / Tipo de Cuenta */}
                 <section className="bg-white rounded-2xl p-6 sm:p-8 shadow-xs border border-[#ebe2cf]">
@@ -970,6 +1243,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                   </button>
                 </div>
               </form>
+              )}
             </div>
           )}
         </div>

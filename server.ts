@@ -1,10 +1,12 @@
 import express from "express";
+import crypto from "crypto";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
 import {
   sendWelcomeEmail,
+  sendRegistrationVerificationEmail,
   sendInvoiceEmail,
   sendProjectStatusEmail,
   sendSupportTicketEmail,
@@ -28,6 +30,12 @@ async function withEmailTimeout<T>(promise: Promise<T>, fallback: T, ms = 6000):
 
 // In-memory store for password reset codes (email -> { code, expiresAt, used })
 const passwordResetCodes = new Map<string, { code: string; expiresAt: number; used: boolean }>();
+
+// In-memory store for registration email verification (email -> { code, token, expiresAt, verified })
+const emailVerifications = new Map<
+  string,
+  { code: string; token: string; expiresAt: number; verified: boolean }
+>();
 
 dotenv.config({ override: true });
 
@@ -311,12 +319,22 @@ async function initDatabaseTables() {
           used BOOLEAN NOT NULL DEFAULT FALSE,
           created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
         );
+
+        CREATE TABLE IF NOT EXISTS email_verifications (
+          email VARCHAR(255) PRIMARY KEY,
+          code VARCHAR(20) NOT NULL,
+          token VARCHAR(128) NOT NULL,
+          expires_at BIGINT NOT NULL,
+          verified BOOLEAN NOT NULL DEFAULT FALSE,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
       `);
 
-      // Ensure data JSONB column exists if table was created previously without it
+      // Ensure data JSONB column and email_verified column exist
       await client.query("ALTER TABLE project_requests ADD COLUMN IF NOT EXISTS data JSONB;");
+      await client.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT TRUE;");
 
-      console.log("✅ [Render PostgreSQL] Tablas 'users', 'project_requests', 'direct_orders' y 'password_resets' listas y verificadas.");
+      console.log("✅ [Render PostgreSQL] Tablas 'users', 'project_requests', 'direct_orders', 'password_resets' y 'email_verifications' listas y verificadas.");
     } finally {
       client.release();
     }
@@ -712,7 +730,102 @@ app.post("/api/notifications/invoice", async (req, res) => {
   }
 });
 
-// Render PostgreSQL: Register User with Welcome Email
+// Helper: Resolve public base URL for email links
+function getPublicBaseUrl(req: express.Request): string {
+  const envUrl = (process.env.APP_URL || "").trim().replace(/\/$/, "");
+  if (envUrl) return envUrl;
+  const proto = req.headers["x-forwarded-proto"] || req.protocol || "http";
+  const host = req.get("host");
+  return host ? `${proto}://${host}` : "http://localhost:3000";
+}
+
+// Helper: Activate verified user and dispatch welcome email
+async function finalizeVerifiedRegistration(normalizedEmail: string) {
+  const pool = getDbPool();
+  let userObj: any = null;
+
+  if (pool) {
+    try {
+      await pool.query("UPDATE email_verifications SET verified = TRUE WHERE LOWER(email) = LOWER($1);", [
+        normalizedEmail,
+      ]);
+      const upd = await pool.query(
+        `UPDATE users SET email_verified = TRUE, updated_at = NOW()
+         WHERE LOWER(email) = LOWER($1)
+         RETURNING id, full_name, email, role, document_type, document_number, phone, city, company_name, avatar_url, created_at;`,
+        [normalizedEmail]
+      );
+      if (upd.rows && upd.rows.length > 0) {
+        const row = upd.rows[0];
+        userObj = {
+          id: row.id,
+          fullName: row.full_name,
+          email: row.email,
+          role: row.role,
+          documentType: row.document_type,
+          documentNumber: row.document_number,
+          phone: row.phone,
+          city: row.city,
+          companyName: row.company_name,
+          avatarUrl: row.avatar_url,
+          createdAt: row.created_at,
+          emailVerified: true,
+        };
+      }
+    } catch (err: any) {
+      console.warn("PostgreSQL finalizeVerifiedRegistration notice:", err.message);
+    }
+  }
+
+  const memRec = emailVerifications.get(normalizedEmail);
+  if (memRec) {
+    memRec.verified = true;
+    emailVerifications.set(normalizedEmail, memRec);
+  }
+
+  const mockUser = mockUsers.get(normalizedEmail);
+  if (mockUser) {
+    mockUser.emailVerified = true;
+    mockUsers.set(normalizedEmail, mockUser);
+    if (!userObj) {
+      userObj = {
+        id: mockUser.id,
+        fullName: mockUser.fullName,
+        email: mockUser.email,
+        role: mockUser.role,
+        documentType: mockUser.documentType,
+        documentNumber: mockUser.documentNumber,
+        phone: mockUser.phone,
+        city: mockUser.city,
+        companyName: mockUser.companyName,
+        avatarUrl: mockUser.avatarUrl,
+        createdAt: mockUser.createdAt,
+        emailVerified: true,
+      };
+    }
+  }
+
+  let welcomeEmailResult: any = null;
+  if (userObj) {
+    welcomeEmailResult = await withEmailTimeout(
+      sendWelcomeEmail({
+        fullName: userObj.fullName,
+        email: userObj.email,
+        role: userObj.role,
+        documentType: userObj.documentType,
+        documentNumber: userObj.documentNumber,
+        phone: userObj.phone,
+        city: userObj.city,
+        companyName: userObj.companyName || undefined,
+      }),
+      { success: true, simulated: true, provider: "Simulator", diagnostic: "Correo de bienvenida en proceso." }
+    );
+  }
+
+  return { user: userObj, welcomeEmailResult };
+}
+
+// Render PostgreSQL: Register User -> Sends Verification Email First
 app.post("/api/auth/register", async (req, res) => {
   const {
     id,
@@ -734,8 +847,17 @@ app.post("/api/auth/register", async (req, res) => {
   const normalizedEmail = email.trim().toLowerCase();
   const userId = id || `USR-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`;
 
+  // Check if a verified account already exists in mockUsers
+  const existingMock = mockUsers.get(normalizedEmail);
+  if (existingMock && existingMock.emailVerified !== false) {
+    return res.status(409).json({
+      success: false,
+      error: "El correo electrónico ya se encuentra registrado en ColorLink Pintuco.",
+    });
+  }
+
   const createdUser = {
-    id: userId,
+    id: existingMock?.id || userId,
     fullName: fullName.trim(),
     email: normalizedEmail,
     password_hash: password,
@@ -746,73 +868,119 @@ app.post("/api/auth/register", async (req, res) => {
     city: city || "Bogotá",
     companyName: companyName || null,
     createdAt: new Date().toISOString().split("T")[0],
+    emailVerified: false,
   };
-
-  // Check if email already in mockUsers
-  if (mockUsers.has(normalizedEmail)) {
-    return res.status(409).json({
-      success: false,
-      error: "El correo electrónico ya se encuentra registrado en ColorLink Pintuco.",
-    });
-  }
 
   const pool = getDbPool();
   if (pool) {
     try {
-      const existing = await pool.query("SELECT id, email FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1;", [
-        normalizedEmail,
-      ]);
+      const existing = await pool.query(
+        "SELECT id, email, email_verified FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1;",
+        [normalizedEmail]
+      );
 
       if (existing.rows && existing.rows.length > 0) {
-        return res.status(409).json({
-          success: false,
-          error: "El correo electrónico ya se encuentra registrado en ColorLink Pintuco.",
-        });
+        if (existing.rows[0].email_verified !== false) {
+          return res.status(409).json({
+            success: false,
+            error: "El correo electrónico ya se encuentra registrado en ColorLink Pintuco.",
+          });
+        }
+        // Pending unverified registration: update with latest registration data and resend verification
+        createdUser.id = existing.rows[0].id;
+        await pool.query(
+          `UPDATE users
+           SET full_name = $2, password_hash = $3, role = $4, document_type = $5,
+               document_number = $6, phone = $7, city = $8, company_name = $9,
+               email_verified = FALSE, updated_at = NOW()
+           WHERE LOWER(email) = LOWER($1);`,
+          [
+            normalizedEmail,
+            createdUser.fullName,
+            password,
+            createdUser.role,
+            createdUser.documentType,
+            createdUser.documentNumber,
+            createdUser.phone,
+            createdUser.city,
+            createdUser.companyName,
+          ]
+        );
+      } else {
+        await pool.query(
+          `INSERT INTO users (
+            id, full_name, email, password_hash, role, document_type,
+            document_number, phone, city, company_name, email_verified, created_at, updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, FALSE, NOW(), NOW());`,
+          [
+            createdUser.id,
+            createdUser.fullName,
+            normalizedEmail,
+            password,
+            createdUser.role,
+            createdUser.documentType,
+            createdUser.documentNumber,
+            createdUser.phone,
+            createdUser.city,
+            createdUser.companyName,
+          ]
+        );
       }
-
-      await pool.query(
-        `INSERT INTO users (
-          id, full_name, email, password_hash, role, document_type,
-          document_number, phone, city, company_name, created_at, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW());`,
-        [
-          userId,
-          fullName.trim(),
-          normalizedEmail,
-          password,
-          role || "Constructora / Arquitecto",
-          documentType || "NIT",
-          documentNumber || "",
-          phone || "",
-          city || "Bogotá",
-          companyName || null,
-        ]
-      );
     } catch (err: any) {
       console.warn("PostgreSQL register notice (saved in-memory):", err.message);
     }
   }
 
-  // Save to in-memory store
+  // Save pending unverified user in memory
   mockUsers.set(normalizedEmail, createdUser);
 
-  // Dispatch welcome email and return delivery info
+  // Create verification OTP code + token
+  const code = Math.floor(100000 + Math.random() * 900000).toString();
+  const token = crypto.randomBytes(24).toString("hex");
+  const expiresAt = Date.now() + 30 * 60 * 1000;
+
+  emailVerifications.set(normalizedEmail, { code, token, expiresAt, verified: false });
+
+  if (pool) {
+    try {
+      await pool.query(
+        `INSERT INTO email_verifications (email, code, token, expires_at, verified, created_at)
+         VALUES ($1, $2, $3, $4, FALSE, NOW())
+         ON CONFLICT (email) DO UPDATE
+           SET code = EXCLUDED.code, token = EXCLUDED.token, expires_at = EXCLUDED.expires_at, verified = FALSE, created_at = NOW();`,
+        [normalizedEmail, code, token, expiresAt]
+      );
+    } catch (err: any) {
+      console.warn("PostgreSQL email_verifications insert notice:", err.message);
+    }
+  }
+
+  const baseUrl = getPublicBaseUrl(req);
+  const verificationUrl = `${baseUrl}/api/auth/verify-registration-link?email=${encodeURIComponent(
+    normalizedEmail
+  )}&token=${encodeURIComponent(token)}`;
+
   const emailResult = await withEmailTimeout(
-    sendWelcomeEmail({
-      fullName: fullName.trim(),
+    sendRegistrationVerificationEmail({
+      fullName: createdUser.fullName,
       email: normalizedEmail,
-      role: role || "Constructora / Arquitecto",
-      documentType: documentType || "NIT",
-      documentNumber: documentNumber || "",
-      phone: phone || "",
-      city: city || "Bogotá",
-      companyName: companyName || undefined,
+      code,
+      verificationUrl,
+      role: createdUser.role,
+      expiresMinutes: 30,
     }),
-    { success: true, simulated: true, provider: "Simulator", diagnostic: "Correo de bienvenida en proceso." }
+    {
+      success: true,
+      simulated: true,
+      provider: "Simulator",
+      diagnostic: "Correo de verificación en proceso.",
+    }
   );
 
   return res.json({
     success: true,
+    requiresVerification: true,
+    email: normalizedEmail,
     emailResult,
     user: {
       id: createdUser.id,
@@ -825,8 +993,305 @@ app.post("/api/auth/register", async (req, res) => {
       city: createdUser.city,
       companyName: createdUser.companyName,
       createdAt: createdUser.createdAt,
+      emailVerified: false,
     },
   });
+});
+
+// Auth: Confirm Registration with 6-digit OTP code (or token)
+app.post("/api/auth/verify-registration", async (req, res) => {
+  const { email, code, token } = req.body || {};
+  if (!email || (!code && !token)) {
+    return res.status(400).json({
+      success: false,
+      error: "Correo electrónico y código de verificación son obligatorios.",
+    });
+  }
+
+  const normalizedEmail = String(email).trim().toLowerCase();
+  const normalizedCode = code ? String(code).trim() : "";
+  const normalizedToken = token ? String(token).trim() : "";
+
+  let record: { code: string; token: string; expiresAt: number; verified: boolean } | null = null;
+  const pool = getDbPool();
+
+  if (pool) {
+    try {
+      const dbRes = await pool.query(
+        "SELECT code, token, expires_at, verified FROM email_verifications WHERE LOWER(email) = LOWER($1) LIMIT 1;",
+        [normalizedEmail]
+      );
+      if (dbRes.rows && dbRes.rows.length > 0) {
+        record = {
+          code: dbRes.rows[0].code,
+          token: dbRes.rows[0].token,
+          expiresAt: Number(dbRes.rows[0].expires_at),
+          verified: Boolean(dbRes.rows[0].verified),
+        };
+      }
+    } catch (err: any) {
+      console.warn("PostgreSQL email_verifications lookup notice:", err.message);
+    }
+  }
+
+  if (!record) {
+    record = emailVerifications.get(normalizedEmail) || null;
+  }
+
+  if (!record) {
+    return res.status(400).json({
+      success: false,
+      error: "No encontramos una solicitud de verificación activa para este correo. Solicita un nuevo código.",
+    });
+  }
+
+  if (record.verified) {
+    const finalized = await finalizeVerifiedRegistration(normalizedEmail);
+    return res.json({
+      success: true,
+      verified: true,
+      alreadyVerified: true,
+      user: finalized.user,
+      welcomeEmailResult: finalized.welcomeEmailResult,
+    });
+  }
+
+  if (Date.now() > record.expiresAt) {
+    return res.status(400).json({
+      success: false,
+      error: "El código de verificación ha expirado. Haz clic en Reenviar código para recibir uno nuevo.",
+    });
+  }
+
+  const matchesCode = normalizedCode && record.code === normalizedCode;
+  const matchesToken = normalizedToken && record.token === normalizedToken;
+  if (!matchesCode && !matchesToken) {
+    return res.status(400).json({
+      success: false,
+      error: "El código de verificación es incorrecto. Verifica tu correo e inténtalo de nuevo.",
+    });
+  }
+
+  const finalized = await finalizeVerifiedRegistration(normalizedEmail);
+  return res.json({
+    success: true,
+    verified: true,
+    message: "¡Correo confirmado con éxito! Tu cuenta en ColorLink Pintuco está activa.",
+    user: finalized.user,
+    welcomeEmailResult: finalized.welcomeEmailResult,
+  });
+});
+
+// Auth: One-click confirmation link clicked from verification email
+app.get("/api/auth/verify-registration-link", async (req, res) => {
+  const emailParam = String(req.query.email || "").trim().toLowerCase();
+  const tokenParam = String(req.query.token || "").trim();
+
+  if (!emailParam || !tokenParam) {
+    return res
+      .status(400)
+      .send("<h2>Enlace de verificación inválido</h2><p>Faltan parámetros de confirmación.</p>");
+  }
+
+  let record: { token: string; expiresAt: number; verified: boolean } | null = null;
+  const pool = getDbPool();
+  if (pool) {
+    try {
+      const dbRes = await pool.query(
+        "SELECT token, expires_at, verified FROM email_verifications WHERE LOWER(email) = LOWER($1) LIMIT 1;",
+        [emailParam]
+      );
+      if (dbRes.rows && dbRes.rows.length > 0) {
+        record = {
+          token: dbRes.rows[0].token,
+          expiresAt: Number(dbRes.rows[0].expires_at),
+          verified: Boolean(dbRes.rows[0].verified),
+        };
+      }
+    } catch (err: any) {
+      console.warn("PostgreSQL verify-link notice:", err.message);
+    }
+  }
+  if (!record) {
+    record = emailVerifications.get(emailParam) || null;
+  }
+
+  const appUrl = getPublicBaseUrl(req);
+  if (!record || record.token !== tokenParam) {
+    return res.status(400).send(`<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><title>ColorLink Pintuco</title></head><body style="font-family:sans-serif;background:#fff8f0;padding:40px;text-align:center;"><div style="max-width:480px;margin:auto;background:#fff;padding:32px;border-radius:16px;border:1px solid #ebe2cf;"><h2 style="color:#991b1b;">Enlace inválido o expirado</h2><p style="color:#4d4632;">Por favor solicita un nuevo correo de verificación desde ColorLink.</p><a href="${appUrl}" style="display:inline-block;margin-top:16px;padding:12px 24px;background:#ffd100;color:#0d4788;font-weight:bold;text-decoration:none;border-radius:999px;">Volver a ColorLink</a></div></body></html>`);
+  }
+
+  if (!record.verified && Date.now() > record.expiresAt) {
+    return res.status(400).send(`<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><title>ColorLink Pintuco</title></head><body style="font-family:sans-serif;background:#fff8f0;padding:40px;text-align:center;"><div style="max-width:480px;margin:auto;background:#fff;padding:32px;border-radius:16px;border:1px solid #ebe2cf;"><h2 style="color:#92400e;">El enlace ha expirado</h2><p style="color:#4d4632;">Regresa a ColorLink y solicita un nuevo código de confirmación.</p><a href="${appUrl}" style="display:inline-block;margin-top:16px;padding:12px 24px;background:#ffd100;color:#0d4788;font-weight:bold;text-decoration:none;border-radius:999px;">Volver a ColorLink</a></div></body></html>`);
+  }
+
+  await finalizeVerifiedRegistration(emailParam);
+  return res.status(200).send(`<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><title>Registro Confirmado - ColorLink Pintuco</title></head><body style="font-family:sans-serif;background:#fff8f0;padding:40px;text-align:center;"><div style="max-width:500px;margin:auto;background:#fff;padding:36px;border-radius:20px;border:1px solid #ebe2cf;box-shadow:0 8px 30px rgba(0,0,0,0.06);"><div style="width:56px;height:56px;border-radius:50%;background:#dcfce7;color:#166534;font-size:28px;line-height:56px;margin:0 auto 16px;">✓</div><h1 style="color:#0d4788;margin:0 0 10px;font-size:22px;">¡Registro Confirmado con Éxito!</h1><p style="color:#4d4632;font-size:14px;line-height:1.6;">Tu correo <strong>${emailParam}</strong> ha sido verificado y tu cuenta en <strong>ColorLink Pintuco</strong> ya se encuentra activa. También te enviamos tu correo de bienvenida.</p><a href="${appUrl}" style="display:inline-block;margin-top:20px;padding:12px 28px;background:#ffd100;color:#0d4788;font-weight:800;text-decoration:none;border-radius:999px;">Ir a ColorLink Pintuco</a></div></body></html>`);
+});
+
+// Auth: Resend verification email for a pending registration
+app.post("/api/auth/resend-verification", async (req, res) => {
+  const { email } = req.body || {};
+  if (!email || typeof email !== "string" || !email.includes("@")) {
+    return res.status(400).json({ success: false, error: "Correo electrónico inválido." });
+  }
+
+  const normalizedEmail = email.trim().toLowerCase();
+  const pool = getDbPool();
+  let userFullName = "Usuario ColorLink";
+  let userRole = "Constructora / Arquitecto";
+
+  if (pool) {
+    try {
+      const dbUser = await pool.query(
+        "SELECT full_name, role, email_verified FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1;",
+        [normalizedEmail]
+      );
+      if (dbUser.rows && dbUser.rows.length > 0) {
+        if (dbUser.rows[0].email_verified === true) {
+          return res.json({
+            success: true,
+            alreadyVerified: true,
+            message: "Esta cuenta ya se encuentra verificada. Puedes iniciar sesión.",
+          });
+        }
+        userFullName = dbUser.rows[0].full_name || userFullName;
+        userRole = dbUser.rows[0].role || userRole;
+      }
+    } catch (err: any) {
+      console.warn("PostgreSQL resend-verification lookup notice:", err.message);
+    }
+  }
+
+  const mockUser = mockUsers.get(normalizedEmail);
+  if (mockUser) {
+    if (mockUser.emailVerified === true) {
+      return res.json({
+        success: true,
+        alreadyVerified: true,
+        message: "Esta cuenta ya se encuentra verificada. Puedes iniciar sesión.",
+      });
+    }
+    userFullName = mockUser.fullName || userFullName;
+    userRole = mockUser.role || userRole;
+  }
+
+  const code = Math.floor(100000 + Math.random() * 900000).toString();
+  const token = crypto.randomBytes(24).toString("hex");
+  const expiresAt = Date.now() + 30 * 60 * 1000;
+
+  emailVerifications.set(normalizedEmail, { code, token, expiresAt, verified: false });
+
+  if (pool) {
+    try {
+      await pool.query(
+        `INSERT INTO email_verifications (email, code, token, expires_at, verified, created_at)
+         VALUES ($1, $2, $3, $4, FALSE, NOW())
+         ON CONFLICT (email) DO UPDATE
+           SET code = EXCLUDED.code, token = EXCLUDED.token, expires_at = EXCLUDED.expires_at, verified = FALSE, created_at = NOW();`,
+        [normalizedEmail, code, token, expiresAt]
+      );
+    } catch (err: any) {
+      console.warn("PostgreSQL resend-verification insert notice:", err.message);
+    }
+  }
+
+  const baseUrl = getPublicBaseUrl(req);
+  const verificationUrl = `${baseUrl}/api/auth/verify-registration-link?email=${encodeURIComponent(
+    normalizedEmail
+  )}&token=${encodeURIComponent(token)}`;
+
+  const emailResult = await withEmailTimeout(
+    sendRegistrationVerificationEmail({
+      fullName: userFullName,
+      email: normalizedEmail,
+      code,
+      verificationUrl,
+      role: userRole,
+      expiresMinutes: 30,
+    }),
+    {
+      success: true,
+      simulated: true,
+      provider: "Simulator",
+      diagnostic: "Correo de verificación reenviado.",
+    }
+  );
+
+  return res.json({
+    success: true,
+    message: `Hemos reenviado el código de verificación a ${normalizedEmail}.`,
+    emailResult,
+  });
+});
+
+// Auth: Check if a pending registration was verified (e.g. via email link)
+app.post("/api/auth/verification-status", async (req, res) => {
+  const { email } = req.body || {};
+  if (!email) {
+    return res.status(400).json({ success: false, error: "Correo requerido" });
+  }
+  const normalizedEmail = String(email).trim().toLowerCase();
+  const pool = getDbPool();
+
+  if (pool) {
+    try {
+      const result = await pool.query(
+        "SELECT id, full_name, email, role, document_type, document_number, phone, city, company_name, avatar_url, created_at, email_verified FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1;",
+        [normalizedEmail]
+      );
+      if (result.rows && result.rows.length > 0 && result.rows[0].email_verified === true) {
+        const row = result.rows[0];
+        return res.json({
+          success: true,
+          verified: true,
+          user: {
+            id: row.id,
+            fullName: row.full_name,
+            email: row.email,
+            role: row.role,
+            documentType: row.document_type,
+            documentNumber: row.document_number,
+            phone: row.phone,
+            city: row.city,
+            companyName: row.company_name,
+            avatarUrl: row.avatar_url,
+            createdAt: row.created_at,
+            emailVerified: true,
+          },
+        });
+      }
+    } catch (err: any) {
+      console.warn("PostgreSQL verification-status notice:", err.message);
+    }
+  }
+
+  const mockUser = mockUsers.get(normalizedEmail);
+  const memRec = emailVerifications.get(normalizedEmail);
+  if ((mockUser && mockUser.emailVerified === true) || memRec?.verified) {
+    return res.json({
+      success: true,
+      verified: true,
+      user: mockUser
+        ? {
+            id: mockUser.id,
+            fullName: mockUser.fullName,
+            email: mockUser.email,
+            role: mockUser.role,
+            documentType: mockUser.documentType,
+            documentNumber: mockUser.documentNumber,
+            phone: mockUser.phone,
+            city: mockUser.city,
+            companyName: mockUser.companyName,
+            avatarUrl: mockUser.avatarUrl,
+            createdAt: mockUser.createdAt,
+            emailVerified: true,
+          }
+        : undefined,
+    });
+  }
+
+  return res.json({ success: true, verified: false });
 });
 
 // Notifications: Send Project Status Update Email
@@ -982,7 +1447,7 @@ app.post("/api/auth/login", async (req, res) => {
   if (pool) {
     try {
       const result = await pool.query(
-        "SELECT id, full_name, email, password_hash, role, document_type, document_number, phone, city, company_name, avatar_url, created_at FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1;",
+        "SELECT id, full_name, email, password_hash, role, document_type, document_number, phone, city, company_name, avatar_url, created_at, email_verified FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1;",
         [normalizedEmail]
       );
 
@@ -990,6 +1455,15 @@ app.post("/api/auth/login", async (req, res) => {
         const row = result.rows[0];
         if (row.password_hash && row.password_hash !== password) {
           return res.status(401).json({ success: false, error: "Contraseña incorrecta" });
+        }
+
+        if (row.email_verified === false) {
+          return res.status(403).json({
+            success: false,
+            requiresVerification: true,
+            email: row.email,
+            error: "Tu cuenta aún no ha sido verificada. Revisa tu correo electrónico para confirmar tu registro.",
+          });
         }
 
         return res.json({
@@ -1019,6 +1493,14 @@ app.post("/api/auth/login", async (req, res) => {
   if (mockUser) {
     if (mockUser.password_hash && mockUser.password_hash !== password) {
       return res.status(401).json({ success: false, error: "Contraseña incorrecta" });
+    }
+    if (mockUser.emailVerified === false) {
+      return res.status(403).json({
+        success: false,
+        requiresVerification: true,
+        email: mockUser.email,
+        error: "Tu cuenta aún no ha sido verificada. Revisa tu correo electrónico para confirmar tu registro.",
+      });
     }
     return res.json({
       success: true,
