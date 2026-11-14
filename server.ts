@@ -13,11 +13,13 @@ import {
   sendPasswordResetEmail,
   getResendStatus,
   getSmtpStatus,
+  getBrevoStatus,
+  getLastSmtpError,
   getRecentEmailLogs,
 } from "./serverEmailService";
 
 // Helper to prevent email dispatch from blocking HTTP responses for too long
-async function withEmailTimeout<T>(promise: Promise<T>, fallback: T, ms = 6000): Promise<T> {
+async function withEmailTimeout<T>(promise: Promise<T>, fallback: T, ms = 11000): Promise<T> {
   try {
     return await Promise.race([
       promise,
@@ -1326,18 +1328,24 @@ app.post("/api/notifications/project-status", async (req, res) => {
   }
 });
 
-// Notifications: Get Status & Diagnostic Info (Resend & SMTP)
+// Notifications: Get Status & Diagnostic Info (Resend, Brevo & SMTP)
 app.get("/api/notifications/status", (req, res) => {
   const resend = getResendStatus();
   const smtp = getSmtpStatus();
-  const canSendToAnyEmail = Boolean(smtp.isConfigured || resend.hasCustomDomain);
+  const brevo = getBrevoStatus();
+  const lastSmtpError = getLastSmtpError();
+  const canSendToAnyEmail = Boolean(brevo.isConfigured || smtp.isConfigured || resend.hasCustomDomain);
 
   return res.json({
     success: true,
     resend,
     smtp,
+    brevo,
+    lastSmtpError,
     canSendToAnyEmail,
-    activeMode: smtp.isConfigured
+    activeMode: brevo.isConfigured
+      ? "Brevo HTTPS API (Puerto 443 - Envío directo a Outlook/Gmail/cualquier correo)"
+      : smtp.isConfigured
       ? `SMTP (${smtp.isGmail ? "Gmail" : smtp.host} - Envío directo a cualquier correo)`
       : resend.isConfigured
       ? resend.hasCustomDomain
@@ -1348,7 +1356,7 @@ app.get("/api/notifications/status", (req, res) => {
   });
 });
 
-// Notifications: Test Email Configuration (Resend & SMTP Diagnostic Endpoint)
+// Notifications: Test Email Configuration (Resend, Brevo & SMTP Diagnostic Endpoint)
 app.post("/api/test/email", async (req, res) => {
   const { toEmail } = req.body || {};
   const targetEmail = toEmail ? toEmail.trim() : (process.env.RESEND_ACCOUNT_EMAIL || process.env.RESEND_TEST_EMAIL || "");
@@ -1360,6 +1368,7 @@ app.post("/api/test/email", async (req, res) => {
   }
   const resendStatus = getResendStatus();
   const smtpStatus = getSmtpStatus();
+  const brevoStatus = getBrevoStatus();
 
   try {
     const emailPromise = sendWelcomeEmail({
@@ -1370,15 +1379,16 @@ app.post("/api/test/email", async (req, res) => {
     });
 
     const timeoutPromise = new Promise<any>((_, reject) =>
-      setTimeout(() => reject(new Error("Tiempo de espera agotado (8 segundos) conectando al servidor de correo.")), 8000)
+      setTimeout(() => reject(new Error("Tiempo de espera agotado (12 segundos) conectando al servidor de correo.")), 12000)
     );
 
     const result = await Promise.race([emailPromise, timeoutPromise]);
 
     const isRedirected = Boolean(result.redirected);
+    const smtpFailedNotice = result.smtpError ? ` Nota: SMTP falló (${result.smtpError}).` : "";
     const message = result.success
       ? isRedirected
-        ? `Correo de prueba entregado en ${result.redirectedTo} con etiqueta [Para: ${result.originalTo}] mediante el modo Sandbox de Resend.`
+        ? `Correo redirigido a ${result.redirectedTo} por Resend Sandbox (para: ${result.originalTo}).${smtpFailedNotice}`
         : `Correo de prueba entregado exitosamente a ${targetEmail} vía ${result.provider}`
       : result.error || "No se pudo entregar el correo";
 
@@ -1387,7 +1397,9 @@ app.post("/api/test/email", async (req, res) => {
       result,
       resendStatus,
       smtpStatus,
-      canSendToAnyEmail: Boolean(smtpStatus.isConfigured || resendStatus.hasCustomDomain),
+      brevoStatus,
+      lastSmtpError: getLastSmtpError(),
+      canSendToAnyEmail: Boolean(brevoStatus.isConfigured || smtpStatus.isConfigured || resendStatus.hasCustomDomain),
       providerUsed: result.provider || (result.simulated ? "Simulator" : "Unknown"),
       message,
     });
@@ -1397,7 +1409,9 @@ app.post("/api/test/email", async (req, res) => {
       success: false,
       resendStatus,
       smtpStatus,
-      canSendToAnyEmail: Boolean(smtpStatus.isConfigured || resendStatus.hasCustomDomain),
+      brevoStatus,
+      lastSmtpError: getLastSmtpError(),
+      canSendToAnyEmail: Boolean(brevoStatus.isConfigured || smtpStatus.isConfigured || resendStatus.hasCustomDomain),
       providerUsed: "Error",
       message: err.message || "Error procesando envío de prueba",
       result: {

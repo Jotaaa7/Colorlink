@@ -7,10 +7,11 @@ dotenv.config({ override: true });
 export interface EmailResult {
   success: boolean;
   simulated: boolean;
-  provider?: 'Resend' | 'SMTP' | 'Ethereal' | 'Simulator';
+  provider?: 'Resend' | 'Brevo' | 'SMTP' | 'Ethereal' | 'Simulator';
   messageId?: string;
   previewUrl?: string;
   error?: string;
+  smtpError?: string;
   diagnostic?: string;
   redirected?: boolean;
   redirectedTo?: string;
@@ -103,7 +104,7 @@ export interface EmailLogEntry {
   timestamp: string;
   to: string;
   subject: string;
-  provider: 'Resend' | 'SMTP' | 'Ethereal' | 'Simulator';
+  provider: 'Resend' | 'Brevo' | 'SMTP' | 'Ethereal' | 'Simulator';
   success: boolean;
   messageId?: string;
   previewUrl?: string;
@@ -116,6 +117,36 @@ const emailLogs: EmailLogEntry[] = [];
 
 export function getRecentEmailLogs(): EmailLogEntry[] {
   return [...emailLogs].reverse().slice(0, 20);
+}
+
+export interface SmtpDiagnosticError {
+  timestamp: string;
+  error: string;
+  hint: string;
+}
+
+let lastSmtpError: SmtpDiagnosticError | null = null;
+
+export function getLastSmtpError(): SmtpDiagnosticError | null {
+  return lastSmtpError;
+}
+
+function classifySmtpError(errMsg: string): string {
+  const lower = (errMsg || '').toLowerCase();
+  if (lower.includes('535') || lower.includes('username and password') || lower.includes('invalid login') || lower.includes('badcredentials')) {
+    return 'Google rechazó SMTP_USER o SMTP_PASS. Verifica que SMTP_PASS sea una Contraseña de Aplicación de 16 letras (no tu clave normal de Gmail) y que la Verificación en dos pasos esté activa.';
+  }
+  if (
+    lower.includes('timeout') ||
+    lower.includes('etimedout') ||
+    lower.includes('enetunreach') ||
+    lower.includes('econnrefused') ||
+    lower.includes('greeting never received') ||
+    lower.includes('socket close')
+  ) {
+    return 'No se pudo conectar a smtp.gmail.com (puerto 587/465). Si estás en el plan Free de Render, Render bloquea puertos SMTP salientes (25/465/587). Solución gratis sin comprar dominio: crea una cuenta gratis en Brevo (300 correos/día), verifica tu Gmail ahí y agrega BREVO_API_KEY + BREVO_FROM en Render (usa puerto HTTPS 443 y envía directo a Outlook/Hotmail).';
+  }
+  return `Error conectando por SMTP: ${errMsg}. Si usas Render Free Tier, utiliza BREVO_API_KEY (HTTPS puerto 443).`;
 }
 
 let detectedResendAccountEmail = (process.env.RESEND_ACCOUNT_EMAIL || process.env.RESEND_TEST_EMAIL || '').trim();
@@ -193,9 +224,52 @@ export function getSmtpStatus(): SmtpStatusData {
   };
 }
 
+export interface BrevoStatusData {
+  isConfigured: boolean;
+  keyMasked: string;
+  senderEmail: string;
+  note: string;
+}
+
 /**
- * Fallback: Creates the Nodemailer transport from environment variables or returns null if not configured
+ * Checks Brevo HTTPS API configuration (works on Render Free Tier where SMTP 465/587 may be blocked)
  */
+export function getBrevoStatus(): BrevoStatusData {
+  dotenv.config({ override: true });
+  const apiKey = (process.env.BREVO_API_KEY || '').trim();
+  const senderEmail = (
+    process.env.BREVO_FROM ||
+    process.env.SMTP_USER ||
+    ''
+  ).trim();
+  const isConfigured = Boolean(apiKey && apiKey.length >= 16 && senderEmail.includes('@'));
+
+  return {
+    isConfigured,
+    keyMasked: apiKey ? `${apiKey.slice(0, 8)}...${apiKey.slice(-4)}` : 'No configurada',
+    senderEmail: senderEmail || 'No configurado',
+    note: isConfigured
+      ? `Brevo HTTPS API activo con remitente ${senderEmail}. Envía por puerto 443 a Outlook, Hotmail y cualquier dominio sin bloqueo de puertos SMTP.`
+      : 'Alternativa recomendada para Render Free Tier: Brevo envía por HTTPS (puerto 443) a Outlook y cualquier correo usando solo tu Gmail verificado gratis (sin comprar dominio).',
+  };
+}
+
+/**
+ * Creates Nodemailer transport with explicit IPv4 (family: 4) to prevent cloud IPv6 timeouts.
+ */
+function buildGmailTransporter(user: string, pass: string, port: number, secure: boolean): Transporter {
+  return nodemailer.createTransport({
+    host: 'smtp.gmail.com',
+    port,
+    secure,
+    auth: { user, pass },
+    family: 4,
+    connectionTimeout: 4500,
+    greetingTimeout: 3500,
+    socketTimeout: 6500,
+  } as any);
+}
+
 export function getEmailTransporter() {
   dotenv.config({ override: true });
   const user = (process.env.SMTP_USER || '').trim();
@@ -208,24 +282,14 @@ export function getEmailTransporter() {
   }
 
   const isGmail = service === 'gmail' || host.includes('gmail') || user.includes('@gmail.com');
-  // Strip spaces from Gmail App Passwords if user pasted them with spaces
   const pass = isGmail ? rawPass.replace(/\s+/g, '') : rawPass;
 
-  // Gmail direct service shortcut or detected gmail address
   if (isGmail) {
-    return nodemailer.createTransport({
-      service: 'gmail',
-      auth: {
-        user,
-        pass,
-      },
-      connectionTimeout: 6000,
-      greetingTimeout: 4000,
-      socketTimeout: 8000,
-    });
+    const port = Number(process.env.SMTP_PORT || 587);
+    const secure = process.env.SMTP_SECURE === 'true' || port === 465;
+    return buildGmailTransporter(user, pass, port, secure);
   }
 
-  // Standard generic SMTP host
   if (host) {
     const port = Number(process.env.SMTP_PORT || 587);
     const secure = process.env.SMTP_SECURE === 'true' || port === 465;
@@ -233,17 +297,15 @@ export function getEmailTransporter() {
       host,
       port,
       secure,
-      auth: {
-        user,
-        pass,
-      },
-      connectionTimeout: 6000,
-      greetingTimeout: 4000,
-      socketTimeout: 8000,
+      auth: { user, pass },
+      family: 4,
+      connectionTimeout: 4500,
+      greetingTimeout: 3500,
+      socketTimeout: 6500,
       tls: {
         rejectUnauthorized: false,
       },
-    });
+    } as any);
   }
 
   return null;
@@ -323,26 +385,94 @@ async function sendOrSimulateEmail(options: {
 }): Promise<EmailResult> {
   const resendStatus = getResendStatus();
   const smtpStatus = getSmtpStatus();
+  const brevoStatus = getBrevoStatus();
   const accountEmail = (process.env.RESEND_ACCOUNT_EMAIL || process.env.RESEND_TEST_EMAIL || '').trim();
   const normalizedTarget = options.to.trim().toLowerCase();
   const isTargetAccountOwner = Boolean(accountEmail && normalizedTarget === accountEmail.toLowerCase());
+  let currentSmtpError: string | undefined;
 
-  // 1. PRIMARY FOR ANY EMAIL: Standard SMTP (Gmail, Brevo, Outlook, etc.)
+  // 0. BREVO HTTPS API (Port 443 - never blocked by Render Free Tier, sends directly to Outlook/Hotmail/Gmail)
+  if (brevoStatus.isConfigured) {
+    try {
+      const brevoRes = await fetch('https://api.brevo.com/v3/smtp/email', {
+        method: 'POST',
+        headers: {
+          'api-key': process.env.BREVO_API_KEY!.trim(),
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify({
+          sender: {
+            name: 'ColorLink Pintuco',
+            email: brevoStatus.senderEmail,
+          },
+          to: [{ email: options.to }],
+          subject: options.subject,
+          htmlContent: options.html,
+          textContent: options.text || options.subject,
+        }),
+      });
+
+      const brevoData: any = await brevoRes.json().catch(() => ({}));
+      if (brevoRes.ok && brevoData?.messageId) {
+        console.log(`✅ [BREVO HTTPS API SENT] Enviado a ${options.to} con ID: ${brevoData.messageId}`);
+        emailLogs.push({
+          id: `log-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+          timestamp: new Date().toISOString(),
+          to: options.to,
+          subject: options.subject,
+          provider: 'Brevo',
+          success: true,
+          messageId: brevoData.messageId,
+          diagnostic: `Entregado exitosamente a ${options.to} vía Brevo HTTPS API (puerto 443).`,
+        });
+
+        return {
+          success: true,
+          simulated: false,
+          provider: 'Brevo',
+          messageId: brevoData.messageId,
+          diagnostic: `Correo enviado a ${options.to} mediante Brevo API`,
+        };
+      } else {
+        const brevoErr = brevoData?.message || `HTTP ${brevoRes.status}`;
+        console.warn(`⚠️ [BREVO NOTICE] ${brevoErr}`);
+        emailLogs.push({
+          id: `log-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+          timestamp: new Date().toISOString(),
+          to: options.to,
+          subject: options.subject,
+          provider: 'Brevo',
+          success: false,
+          error: brevoErr,
+          diagnostic: `Fallo en Brevo API: ${brevoErr}`,
+        });
+      }
+    } catch (brevoEx: any) {
+      console.warn(`⚠️ [BREVO EXCEPTION] ${brevoEx.message}`);
+    }
+  }
+
+  // 1. PRIMARY SMTP (Gmail with IPv4 + 587/465 auto-retry, or custom SMTP)
   if (smtpStatus.isConfigured) {
     const transporter = getEmailTransporter();
     if (transporter) {
-      try {
-        const fromAddress = getSenderAddress(false);
-        const info = await transporter.sendMail({
+      const fromAddress = getSenderAddress(false);
+      const sendMailVia = async (tx: Transporter) =>
+        tx.sendMail({
           from: fromAddress,
+          replyTo: process.env.SMTP_USER?.trim() || fromAddress,
           to: options.to,
           subject: options.subject,
           html: options.html,
           text: options.text || options.subject,
         });
 
+      try {
+        const info = await sendMailVia(transporter);
+        lastSmtpError = null;
         console.log(`✅ [SMTP EMAIL SENT TO ANY RECIPIENT] Enviado con éxito a ${options.to} con ID: ${info.messageId}`);
-        const logEntry: EmailLogEntry = {
+        emailLogs.push({
           id: `log-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
           timestamp: new Date().toISOString(),
           to: options.to,
@@ -351,8 +481,7 @@ async function sendOrSimulateEmail(options: {
           success: true,
           messageId: info.messageId,
           diagnostic: `Entregado exitosamente a ${options.to} vía SMTP (${smtpStatus.isGmail ? 'Gmail' : smtpStatus.host}).`,
-        };
-        emailLogs.push(logEntry);
+        });
 
         return {
           success: true,
@@ -361,8 +490,52 @@ async function sendOrSimulateEmail(options: {
           messageId: info.messageId,
           diagnostic: `Correo enviado a ${options.to} mediante SMTP`,
         };
-      } catch (err: any) {
-        console.error(`❌ [SMTP ERROR] Error enviando a ${options.to}:`, err.message);
+      } catch (primaryErr: any) {
+        let finalErr = primaryErr;
+
+        // If Gmail failed on primary port (e.g. 587), retry alternate port (465 SSL or 587 STARTTLS) once
+        if (smtpStatus.isGmail) {
+          const user = (process.env.SMTP_USER || '').trim();
+          const pass = (process.env.SMTP_PASS || '').trim().replace(/\s+/g, '');
+          const triedPort = Number(process.env.SMTP_PORT || 587);
+          const altPort = triedPort === 465 ? 587 : 465;
+          const altSecure = altPort === 465;
+          try {
+            const altTransporter = buildGmailTransporter(user, pass, altPort, altSecure);
+            const infoAlt = await sendMailVia(altTransporter);
+            lastSmtpError = null;
+            console.log(`✅ [SMTP GMAIL ALT PORT ${altPort} SENT] Enviado a ${options.to} con ID: ${infoAlt.messageId}`);
+            emailLogs.push({
+              id: `log-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+              timestamp: new Date().toISOString(),
+              to: options.to,
+              subject: options.subject,
+              provider: 'SMTP',
+              success: true,
+              messageId: infoAlt.messageId,
+              diagnostic: `Entregado a ${options.to} vía Gmail SMTP puerto ${altPort}.`,
+            });
+            return {
+              success: true,
+              simulated: false,
+              provider: 'SMTP',
+              messageId: infoAlt.messageId,
+              diagnostic: `Correo enviado a ${options.to} mediante Gmail SMTP (puerto ${altPort})`,
+            };
+          } catch (altErr: any) {
+            finalErr = altErr;
+          }
+        }
+
+        const errMsg = finalErr?.message || 'Error SMTP desconocido';
+        const hint = classifySmtpError(errMsg);
+        currentSmtpError = `${errMsg} — ${hint}`;
+        lastSmtpError = {
+          timestamp: new Date().toISOString(),
+          error: errMsg,
+          hint,
+        };
+        console.error(`❌ [SMTP ERROR] Error enviando a ${options.to}:`, errMsg);
         emailLogs.push({
           id: `log-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
           timestamp: new Date().toISOString(),
@@ -370,8 +543,8 @@ async function sendOrSimulateEmail(options: {
           subject: options.subject,
           provider: 'SMTP',
           success: false,
-          error: err.message,
-          diagnostic: `Fallo en SMTP (${smtpStatus.isGmail ? 'Gmail' : smtpStatus.host}): ${err.message}`,
+          error: errMsg,
+          diagnostic: hint,
         });
       }
     }
@@ -475,7 +648,10 @@ async function sendOrSimulateEmail(options: {
             redirected: true,
             redirectedTo: targetRelay,
             originalTo: options.to,
-            diagnostic: `Notificación entregada vía Resend Sandbox (destinatario original: ${options.to}).`,
+            smtpError: currentSmtpError,
+            diagnostic: currentSmtpError
+              ? `SMTP falló (${currentSmtpError}). Resend Sandbox redirigió el correo a ${targetRelay}.`
+              : `Notificación entregada vía Resend Sandbox (destinatario original: ${options.to}).`,
           };
         }
       } catch (relayErr: any) {

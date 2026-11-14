@@ -40,6 +40,19 @@ interface SmtpStatusData {
   note: string;
 }
 
+interface BrevoStatusData {
+  isConfigured: boolean;
+  keyMasked: string;
+  senderEmail: string;
+  note: string;
+}
+
+interface SmtpDiagnosticError {
+  timestamp: string;
+  error: string;
+  hint: string;
+}
+
 interface EmailLogItem {
   id: string;
   timestamp: string;
@@ -68,11 +81,14 @@ export const SupportModal: React.FC<SupportModalProps> = ({ isOpen, onClose, cur
   // Email diagnostic
   const [resendStatus, setResendStatus] = useState<ResendStatusData | null>(null);
   const [smtpStatus, setSmtpStatus] = useState<SmtpStatusData | null>(null);
+  const [brevoStatus, setBrevoStatus] = useState<BrevoStatusData | null>(null);
+  const [lastSmtpError, setLastSmtpError] = useState<SmtpDiagnosticError | null>(null);
   const [canSendToAnyEmail, setCanSendToAnyEmail] = useState<boolean>(false);
   const [activeMode, setActiveMode] = useState<string>('');
   const [testEmail, setTestEmail] = useState(currentUser?.email || '');
   const [isTestingEmail, setIsTestingEmail] = useState(false);
   const [showGmailInstructions, setShowGmailInstructions] = useState(false);
+  const [showBrevoInstructions, setShowBrevoInstructions] = useState(false);
   const [recentLogs, setRecentLogs] = useState<EmailLogItem[]>([]);
   const [testResult, setTestResult] = useState<{
     success: boolean;
@@ -80,6 +96,7 @@ export const SupportModal: React.FC<SupportModalProps> = ({ isOpen, onClose, cur
     provider?: string;
     previewUrl?: string;
     error?: string;
+    smtpError?: string;
     diagnostic?: string;
   } | null>(null);
 
@@ -91,6 +108,8 @@ export const SupportModal: React.FC<SupportModalProps> = ({ isOpen, onClose, cur
         const data = await res.json();
         if (data.resend) setResendStatus(data.resend);
         if (data.smtp) setSmtpStatus(data.smtp);
+        if (data.brevo) setBrevoStatus(data.brevo);
+        setLastSmtpError(data.lastSmtpError || null);
         setCanSendToAnyEmail(Boolean(data.canSendToAnyEmail));
         if (data.activeMode) setActiveMode(data.activeMode);
         if (Array.isArray(data.recentLogs)) setRecentLogs(data.recentLogs);
@@ -158,7 +177,7 @@ export const SupportModal: React.FC<SupportModalProps> = ({ isOpen, onClose, cur
     setTestResult(null);
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000);
+    const timeoutId = setTimeout(() => controller.abort(), 14000);
 
     try {
       const res = await fetch('/api/test/email', {
@@ -175,12 +194,18 @@ export const SupportModal: React.FC<SupportModalProps> = ({ isOpen, onClose, cur
       }
 
       const data = await res.json();
+      if (data.brevoStatus) setBrevoStatus(data.brevoStatus);
+      if (data.smtpStatus) setSmtpStatus(data.smtpStatus);
+      if (data.resendStatus) setResendStatus(data.resendStatus);
+      setLastSmtpError(data.lastSmtpError || null);
+
       setTestResult({
         success: Boolean(data.success),
         message: data.message || (data.success ? 'Correo entregado' : 'Error al enviar'),
         provider: data.providerUsed,
         previewUrl: data.result?.previewUrl,
         error: data.result?.error,
+        smtpError: data.result?.smtpError,
         diagnostic: data.result?.diagnostic,
       });
 
@@ -192,11 +217,11 @@ export const SupportModal: React.FC<SupportModalProps> = ({ isOpen, onClose, cur
       setTestResult({
         success: false,
         message: isAbort
-          ? 'Tiempo de espera agotado al conectar con el servidor de correo (10s)'
+          ? 'Tiempo de espera agotado al conectar con el servidor de correo (14s)'
           : 'Error de conexión con el servidor',
         error: err.message,
         diagnostic:
-          'Verifica que las credenciales SMTP en .env sean correctas y que la cuenta de Google permita el acceso.',
+          'Si usas Render plan Free, recuerda que Render bloquea puertos SMTP (465/587). Configura BREVO_API_KEY + BREVO_FROM en Render para enviar vía HTTPS (puerto 443).',
       });
     } finally {
       setIsTestingEmail(false);
@@ -256,7 +281,7 @@ export const SupportModal: React.FC<SupportModalProps> = ({ isOpen, onClose, cur
           >
             <Mail className="w-3.5 h-3.5 text-[#0d4788]" />
             <span>Servidor de Correo</span>
-            {(resendStatus?.isConfigured || smtpStatus?.isConfigured) && (
+            {(brevoStatus?.isConfigured || resendStatus?.isConfigured || smtpStatus?.isConfigured) && (
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
             )}
           </button>
@@ -452,11 +477,101 @@ export const SupportModal: React.FC<SupportModalProps> = ({ isOpen, onClose, cur
               </div>
             </div>
 
+            {/* Last SMTP Diagnostic Error Alert */}
+            {lastSmtpError && (
+              <div className="p-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-xs text-rose-900 space-y-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-black text-rose-800 flex items-center gap-1.5">
+                    <ShieldAlert className="w-4 h-4 text-rose-600 shrink-0" />
+                    Último Fallo Detectado en SMTP
+                  </span>
+                  <span className="text-[10px] text-rose-700 font-medium">
+                    {new Date(lastSmtpError.timestamp).toLocaleTimeString('es-CO', {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                  </span>
+                </div>
+                <p className="text-[11px] font-mono bg-white/80 px-2.5 py-1.5 rounded-lg border border-rose-200 break-words">
+                  {lastSmtpError.error}
+                </p>
+                <p className="text-[11px] leading-relaxed font-medium text-rose-900">
+                  {lastSmtpError.hint}
+                </p>
+              </div>
+            )}
+
             {/* Providers Status Cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+              {/* Brevo HTTPS API Status (Best for Render Free Tier) */}
+              <div className="p-3 rounded-2xl bg-[#f8fafc] border border-[#e2e8f0] space-y-1.5">
+                <div className="flex items-center justify-between gap-1">
+                  <span className="font-bold text-emerald-800 uppercase text-[10px] tracking-wider flex items-center gap-1">
+                    <Send className="w-3.5 h-3.5" />
+                    Brevo (HTTPS)
+                  </span>
+                  {brevoStatus?.isConfigured ? (
+                    <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
+                      Activo
+                    </span>
+                  ) : (
+                    <span className="text-[10px] font-bold text-[#64748b] bg-[#e2e8f0] px-2 py-0.5 rounded-full">
+                      Render Free
+                    </span>
+                  )}
+                </div>
+                <div className="text-[11px] text-[#475569] truncate">
+                  API Key: <strong>{brevoStatus?.keyMasked || 'No configurada'}</strong>
+                </div>
+                <div className="text-[11px] text-[#475569] truncate" title={brevoStatus?.senderEmail}>
+                  Remitente: <strong>{brevoStatus?.senderEmail || 'No configurado'}</strong>
+                </div>
+                <div className="text-[10px] text-[#64748b] pt-1 border-t border-[#e2e8f0]">
+                  {brevoStatus?.isConfigured
+                    ? 'Puerto 443 activo (Outlook/Gmail)'
+                    : 'No bloqueado en Render Free'}
+                </div>
+              </div>
+
+              {/* SMTP / Gmail Status */}
+              <div className="p-3 rounded-2xl bg-[#f8fafc] border border-[#e2e8f0] space-y-1.5">
+                <div className="flex items-center justify-between gap-1">
+                  <span className="font-bold text-[#725c00] uppercase text-[10px] tracking-wider flex items-center gap-1">
+                    <Send className="w-3.5 h-3.5" />
+                    SMTP Gmail
+                  </span>
+                  {smtpStatus?.isConfigured ? (
+                    <span
+                      className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                        lastSmtpError
+                          ? 'text-rose-700 bg-rose-100'
+                          : 'text-emerald-700 bg-emerald-100'
+                      }`}
+                    >
+                      {lastSmtpError ? 'Con fallo' : 'Activo'}
+                    </span>
+                  ) : (
+                    <span className="text-[10px] font-bold text-[#64748b] bg-[#e2e8f0] px-2 py-0.5 rounded-full">
+                      Opcional
+                    </span>
+                  )}
+                </div>
+                <div className="text-[11px] text-[#475569] truncate">
+                  Cuenta: <strong>{smtpStatus?.userMasked || 'No configurado'}</strong>
+                </div>
+                <div className="text-[11px] text-[#475569] truncate">
+                  Host: <strong>{smtpStatus?.host || 'smtp.gmail.com'}:{smtpStatus?.port || 587}</strong>
+                </div>
+                <div className="text-[10px] text-[#64748b] pt-1 border-t border-[#e2e8f0]">
+                  {smtpStatus?.isConfigured
+                    ? 'Reintento IPv4 en puertos 587/465'
+                    : 'Bloqueado en Render plan Free'}
+                </div>
+              </div>
+
               {/* Resend Status */}
               <div className="p-3 rounded-2xl bg-[#f8fafc] border border-[#e2e8f0] space-y-1.5">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between gap-1">
                   <span className="font-bold text-[#0d4788] uppercase text-[10px] tracking-wider flex items-center gap-1">
                     <Mail className="w-3.5 h-3.5" />
                     Resend API
@@ -467,7 +582,7 @@ export const SupportModal: React.FC<SupportModalProps> = ({ isOpen, onClose, cur
                     </span>
                   )}
                 </div>
-                <div className="text-[11px] text-[#475569]">
+                <div className="text-[11px] text-[#475569] truncate">
                   API Key: <strong>{resendStatus?.rawKeyMasked || 'No configurada'}</strong>
                 </div>
                 <div className="text-[11px] text-[#475569] truncate" title={resendStatus?.sender}>
@@ -476,42 +591,62 @@ export const SupportModal: React.FC<SupportModalProps> = ({ isOpen, onClose, cur
                 <div className="text-[10px] text-[#64748b] pt-1 border-t border-[#e2e8f0]">
                   {resendStatus?.hasCustomDomain
                     ? 'Dominio propio verificado'
-                    : 'Sandbox de prueba (Relay a cuenta registrado)'}
-                </div>
-              </div>
-
-              {/* SMTP / Gmail Status */}
-              <div className="p-3 rounded-2xl bg-[#f8fafc] border border-[#e2e8f0] space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <span className="font-bold text-[#725c00] uppercase text-[10px] tracking-wider flex items-center gap-1">
-                    <Send className="w-3.5 h-3.5" />
-                    SMTP (Gmail / Otros)
-                  </span>
-                  {smtpStatus?.isConfigured ? (
-                    <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
-                      Activo
-                    </span>
-                  ) : (
-                    <span className="text-[10px] font-bold text-[#64748b] bg-[#e2e8f0] px-2 py-0.5 rounded-full">
-                      Opcional
-                    </span>
-                  )}
-                </div>
-                <div className="text-[11px] text-[#475569]">
-                  Cuenta: <strong>{smtpStatus?.userMasked || 'No configurado'}</strong>
-                </div>
-                <div className="text-[11px] text-[#475569]">
-                  Servidor: <strong>{smtpStatus?.host || 'smtp.gmail.com'}</strong>
-                </div>
-                <div className="text-[10px] text-[#64748b] pt-1 border-t border-[#e2e8f0]">
-                  {smtpStatus?.isConfigured
-                    ? 'Envía a cualquier correo sin restricciones'
-                    : 'Permite enviar a cualquier correo gratis'}
+                    : 'Sandbox (redirige si falla SMTP)'}
                 </div>
               </div>
             </div>
 
-            {/* How to enable sending to ANY email without buying a domain */}
+            {/* Brevo HTTPS API Guide (Recommended for Render Free Tier -> Outlook/Hotmail) */}
+            <div className="p-3.5 rounded-2xl bg-emerald-50/60 border border-emerald-200 space-y-2">
+              <button
+                type="button"
+                onClick={() => setShowBrevoInstructions(!showBrevoInstructions)}
+                className="w-full flex items-center justify-between text-left text-xs font-bold text-emerald-900 cursor-pointer"
+              >
+                <span className="flex items-center gap-1.5">
+                  <Info className="w-4 h-4 text-emerald-700 shrink-0" />
+                  <span>¿En Render Free no llegan correos a Outlook? Usa Brevo HTTPS (Gratis)</span>
+                </span>
+                <span className="text-[11px] underline shrink-0 ml-2">
+                  {showBrevoInstructions ? 'Ocultar guía' : 'Ver 3 pasos'}
+                </span>
+              </button>
+
+              {showBrevoInstructions && (
+                <div className="text-xs text-[#334155] space-y-2 pt-2 border-t border-emerald-200 leading-relaxed">
+                  <p>
+                    El plan gratuito de <strong>Render</strong> bloquea los puertos SMTP (25, 465 y 587).{' '}
+                    <strong>Brevo</strong> envía por <strong>HTTPS (puerto 443)</strong>, regala 300 correos/día sin comprar dominio y entrega directo a <strong>Outlook, Hotmail y Gmail</strong>:
+                  </p>
+                  <ol className="list-decimal pl-5 space-y-1.5 text-[11px]">
+                    <li>
+                      Crea una cuenta gratuita en{' '}
+                      <a
+                        href="https://app.brevo.com/account/register"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-emerald-800 font-bold underline inline-flex items-center gap-0.5"
+                      >
+                        brevo.com <ExternalLink className="w-3 h-3" />
+                      </a>{' '}
+                      y verifica tu correo Gmail en <strong>Senders &amp; IP → Senders</strong>.
+                    </li>
+                    <li>
+                      Ve a <strong>SMTP &amp; API → API Keys</strong> y genera una nueva clave (empieza por <code>xkeysib-...</code>).
+                    </li>
+                    <li>
+                      En Render (<strong>Environment</strong>) agrega estas 2 variables y haz <strong>Manual Deploy</strong>:
+                      <pre className="p-2 bg-white rounded-lg font-mono text-[10px] text-[#0f172a] mt-1 select-all overflow-x-auto border border-emerald-200">
+{`BREVO_API_KEY=xkeysib-tu_api_key_aqui
+BREVO_FROM=tu_correo@gmail.com`}
+                      </pre>
+                    </li>
+                  </ol>
+                </div>
+              )}
+            </div>
+
+            {/* How to enable sending to ANY email with Gmail SMTP */}
             <div className="p-3.5 rounded-2xl bg-white border border-[#d1c6ab] space-y-2">
               <button
                 type="button"
@@ -520,7 +655,7 @@ export const SupportModal: React.FC<SupportModalProps> = ({ isOpen, onClose, cur
               >
                 <span className="flex items-center gap-1.5">
                   <Info className="w-4 h-4 text-[#0d4788]" />
-                  <span>¿Cómo enviar a cualquier correo con Gmail SMTP (100% gratis)?</span>
+                  <span>Guía de variables Gmail SMTP (servidores con puertos 587/465 abiertos)</span>
                 </span>
                 <span className="text-[11px] underline">
                   {showGmailInstructions ? 'Ocultar guía' : 'Ver 3 pasos'}
@@ -530,7 +665,7 @@ export const SupportModal: React.FC<SupportModalProps> = ({ isOpen, onClose, cur
               {showGmailInstructions && (
                 <div className="text-xs text-[#334155] space-y-2 pt-2 border-t border-[#e2e8f0] leading-relaxed">
                   <p>
-                    Si no tienes un dominio propio para verificar en Resend, puedes usar cualquier cuenta de <strong>Gmail</strong> para despachar correos a <strong>cualquier destinatario del mundo</strong>:
+                    Si tu servidor permite tráfico SMTP saliente (Render pago o entorno local), usa cualquier cuenta de <strong>Gmail</strong>:
                   </p>
                   <ol className="list-decimal pl-5 space-y-1.5 text-[11px]">
                     <li>
@@ -555,10 +690,10 @@ export const SupportModal: React.FC<SupportModalProps> = ({ isOpen, onClose, cur
                       >
                         Contraseñas de aplicaciones <ExternalLink className="w-3 h-3" />
                       </a>
-                      , escribe el nombre "ColorLink" y haz clic en <strong>Crear</strong>. Copia la clave de 16 letras que aparece.
+                      , escribe el nombre "ColorLink" y haz clic en <strong>Crear</strong>. Copia la clave de 16 letras sin espacios.
                     </li>
                     <li>
-                      Agrega estas 3 líneas a tu archivo <code>.env</code>:
+                      Configura estas variables en Render / <code>.env</code>:
                       <pre className="p-2 bg-[#f1f5f9] rounded-lg font-mono text-[10px] text-[#0f172a] mt-1 select-all overflow-x-auto">
 {`SMTP_SERVICE=gmail
 SMTP_USER=tu_correo@gmail.com
@@ -636,6 +771,11 @@ SMTP_PASS=tu_clave_de_16_letras_sin_espacios`}
                           : 'Diagnóstico de Envío Fallido'}
                       </div>
                       <p>{testResult.message}</p>
+                      {testResult.smtpError && (
+                        <p className="text-[11px] font-semibold bg-rose-50 text-rose-800 p-2 rounded-lg mt-1 border border-rose-200 break-words">
+                          Detalle fallo SMTP: {testResult.smtpError}
+                        </p>
+                      )}
                       {testResult.diagnostic && (
                         <p className="text-[11px] opacity-90 font-medium bg-white/70 p-2 rounded-lg mt-1 border border-current/20">
                           {testResult.diagnostic}
