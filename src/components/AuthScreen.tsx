@@ -18,8 +18,17 @@ import {
   Store,
   HelpCircle,
   AlertCircle,
+  ExternalLink,
+  KeyRound,
+  RefreshCw,
 } from 'lucide-react';
-import { registerUserInDb, loginUserInDb } from '../services/renderDbService';
+import {
+  registerUserInDb,
+  loginUserInDb,
+  requestPasswordReset,
+  confirmPasswordReset,
+  EmailDeliveryResult,
+} from '../services/renderDbService';
 import { APP_IMAGES } from '../assets/images';
 
 interface AuthScreenProps {
@@ -100,10 +109,16 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   const [termsAccepted, setTermsAccepted] = useState(true);
   const [regError, setRegError] = useState('');
 
-  // Forgot password modal
+  // Forgot password modal (2-step OTP verification)
   const [showForgotModal, setShowForgotModal] = useState(false);
+  const [forgotStep, setForgotStep] = useState<'request' | 'verify' | 'done'>('request');
   const [forgotEmail, setForgotEmail] = useState('');
-  const [forgotSent, setForgotSent] = useState(false);
+  const [forgotCode, setForgotCode] = useState('');
+  const [forgotNewPass, setForgotNewPass] = useState('');
+  const [forgotConfirmPass, setForgotConfirmPass] = useState('');
+  const [forgotLoading, setForgotLoading] = useState(false);
+  const [forgotError, setForgotError] = useState('');
+  const [forgotEmailResult, setForgotEmailResult] = useState<EmailDeliveryResult | null>(null);
 
   // Quick preset login handler
   const handleQuickDemoLogin = (demoUser: UserProfile) => {
@@ -112,6 +127,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [regSuccessMsg, setRegSuccessMsg] = useState('');
+  const [regEmailResult, setRegEmailResult] = useState<EmailDeliveryResult | null>(null);
+  const [pendingCreatedUser, setPendingCreatedUser] = useState<UserProfile | null>(null);
 
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -263,10 +280,21 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
         // ignore
       }
 
-      setRegSuccessMsg('¡Usuario registrado con éxito en la base de datos! Iniciando sesión...');
+      const deliveryNote = dbResponse.emailResult?.success
+        ? dbResponse.emailResult.redirected
+          ? `Correo de bienvenida enviado (Sandbox -> ${dbResponse.emailResult.redirectedTo}).`
+          : `Correo de bienvenida enviado a ${createdUser.email} (${dbResponse.emailResult.provider || 'SMTP'}).`
+        : 'Cuenta creada en el sistema.';
+
+      setRegEmailResult(dbResponse.emailResult || null);
+      setPendingCreatedUser(createdUser);
+      setRegSuccessMsg(`¡Usuario registrado con éxito! ${deliveryNote} Iniciando sesión...`);
+      setIsSubmitting(false);
+
+      const delayMs = dbResponse.emailResult?.previewUrl ? 2600 : 1000;
       setTimeout(() => {
         onLoginSuccess(createdUser);
-      }, 700);
+      }, delayMs);
     } catch (err: any) {
       console.error('Registration error:', err);
       setRegError(err.message || 'Error de conexión al registrar usuario');
@@ -274,15 +302,96 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     }
   };
 
-  const handleForgotSubmit = (e: React.FormEvent) => {
+  const openForgotModal = () => {
+    setForgotStep('request');
+    setForgotEmail(loginEmail.includes('@') ? loginEmail.trim() : '');
+    setForgotCode('');
+    setForgotNewPass('');
+    setForgotConfirmPass('');
+    setForgotError('');
+    setForgotEmailResult(null);
+    setShowForgotModal(true);
+  };
+
+  const closeForgotModal = () => {
+    setShowForgotModal(false);
+    setForgotStep('request');
+    setForgotCode('');
+    setForgotNewPass('');
+    setForgotConfirmPass('');
+    setForgotError('');
+    setForgotEmailResult(null);
+  };
+
+  const handleRequestResetCode = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    setForgotError('');
+    const target = forgotEmail.trim();
+    if (!target || !target.includes('@')) {
+      setForgotError('Por favor ingresa un correo electrónico válido.');
+      return;
+    }
+
+    setForgotLoading(true);
+    try {
+      const res = await requestPasswordReset(target);
+      if (!res.success) {
+        setForgotError(res.error || 'No se pudo enviar el código de verificación.');
+        return;
+      }
+      setForgotEmailResult(res.emailResult || null);
+      setForgotStep('verify');
+    } catch (err: any) {
+      setForgotError(err.message || 'Error de conexión enviando el código.');
+    } finally {
+      setForgotLoading(false);
+    }
+  };
+
+  const handleConfirmResetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!forgotEmail) return;
-    setForgotSent(true);
-    setTimeout(() => {
-      setForgotSent(false);
-      setShowForgotModal(false);
-      setForgotEmail('');
-    }, 2500);
+    setForgotError('');
+
+    if (forgotCode.trim().length < 6) {
+      setForgotError('Ingresa el código de 6 dígitos enviado a tu correo.');
+      return;
+    }
+    if (forgotNewPass.length < 6) {
+      setForgotError('La nueva contraseña debe tener al menos 6 caracteres.');
+      return;
+    }
+    if (forgotNewPass !== forgotConfirmPass) {
+      setForgotError('Las contraseñas no coinciden.');
+      return;
+    }
+
+    setForgotLoading(true);
+    try {
+      const res = await confirmPasswordReset(forgotEmail.trim(), forgotCode.trim(), forgotNewPass);
+      if (!res.success) {
+        setForgotError(res.error || 'Código incorrecto o expirado.');
+        return;
+      }
+
+      // Sync updated password with localStorage cache if user exists locally
+      try {
+        const localList = JSON.parse(localStorage.getItem('colorlink_registered_users') || '[]');
+        const updatedList = localList.map((u: any) =>
+          u.email?.toLowerCase() === forgotEmail.trim().toLowerCase()
+            ? { ...u, password: forgotNewPass }
+            : u
+        );
+        localStorage.setItem('colorlink_registered_users', JSON.stringify(updatedList));
+      } catch {
+        // ignore
+      }
+
+      setForgotStep('done');
+    } catch (err: any) {
+      setForgotError(err.message || 'Error restableciendo la contraseña.');
+    } finally {
+      setForgotLoading(false);
+    }
   };
 
   return (
@@ -469,7 +578,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                       </label>
                       <button
                         type="button"
-                        onClick={() => setShowForgotModal(true)}
+                        onClick={openForgotModal}
                         className="text-xs font-bold text-[#725c00] hover:underline"
                       >
                         ¿Olvidaste tu contraseña?
@@ -527,58 +636,6 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                     )}
                   </button>
                 </form>
-
-                {/* Social Login Divider */}
-                <div className="relative my-6 text-center">
-                  <div className="absolute inset-0 flex items-center">
-                    <div className="w-full border-t border-[#ebe2cf]"></div>
-                  </div>
-                  <span className="relative bg-white px-4 text-xs font-semibold text-[#7f765f] uppercase tracking-wider">
-                    o ingresa con tu cuenta corporativa
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <button
-                    type="button"
-                    onClick={() => handleQuickDemoLogin(DEMO_USERS[0])}
-                    className="flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl border border-[#d1c6ab] bg-white hover:bg-[#fff8f0] text-xs font-bold text-[#1f1b10] transition-colors"
-                  >
-                    <svg className="w-4 h-4" viewBox="0 0 24 24">
-                      <path
-                        fill="#4285F4"
-                        d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"
-                      />
-                      <path
-                        fill="#34A853"
-                        d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.34 24 12 24z"
-                      />
-                      <path
-                        fill="#FBBC05"
-                        d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.18 0 9.98 0 12s.45 3.82 1.25 5.42l4.03-3.15z"
-                      />
-                      <path
-                        fill="#EA4335"
-                        d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.34 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z"
-                      />
-                    </svg>
-                    <span>Google Workspace</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => handleQuickDemoLogin(DEMO_USERS[1])}
-                    className="flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl border border-[#d1c6ab] bg-white hover:bg-[#fff8f0] text-xs font-bold text-[#1f1b10] transition-colors"
-                  >
-                    <svg className="w-4 h-4" viewBox="0 0 23 23">
-                      <path fill="#f35325" d="M1 1h10v10H1z" />
-                      <path fill="#81bc06" d="M12 1h10v10H12z" />
-                      <path fill="#05a6f0" d="M1 12h10v10H1z" />
-                      <path fill="#ffba08" d="M12 12h10v10H12z" />
-                    </svg>
-                    <span>Microsoft Entra ID</span>
-                  </button>
-                </div>
               </div>
 
               {/* Bottom helper card */}
@@ -705,9 +762,33 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                   )}
 
                   {regSuccessMsg && (
-                    <div className="mb-6 p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-800 flex items-center gap-2">
-                      <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
-                      <span>{regSuccessMsg}</span>
+                    <div className="mb-6 p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-800 space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
+                          <span className="font-semibold">{regSuccessMsg}</span>
+                        </div>
+                        {pendingCreatedUser && (
+                          <button
+                            type="button"
+                            onClick={() => onLoginSuccess(pendingCreatedUser)}
+                            className="px-3 py-1 rounded-full bg-emerald-700 text-white text-[11px] font-bold hover:bg-emerald-800 shrink-0 cursor-pointer"
+                          >
+                            Entrar ahora →
+                          </button>
+                        )}
+                      </div>
+                      {regEmailResult?.previewUrl && (
+                        <a
+                          href={regEmailResult.previewUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1.5 text-[11px] font-bold text-[#0d4788] underline"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                          <span>Ver correo de bienvenida enviado ({regEmailResult.provider})</span>
+                        </a>
+                      )}
                     </div>
                   )}
 
@@ -894,38 +975,184 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
         </div>
       </div>
 
-      {/* Forgot Password Modal */}
+      {/* Forgot Password Modal (Real 2-Step Verification Code Flow) */}
       {showForgotModal && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 sm:p-8 shadow-2xl border border-[#ebe2cf]">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 sm:p-8 shadow-2xl border border-[#ebe2cf] max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-4 border-b border-[#ebe2cf]">
-              <h3 className="text-xl font-bold text-[#1f1b10]">
-                Recuperar Contraseña
-              </h3>
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-full bg-[#ffd100] text-[#1f1b10] flex items-center justify-center">
+                  <KeyRound className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-[#1f1b10]">
+                    Recuperar Contraseña
+                  </h3>
+                  <p className="text-[11px] text-[#7f765f]">
+                    {forgotStep === 'request'
+                      ? 'Paso 1: Solicita tu código por correo'
+                      : forgotStep === 'verify'
+                      ? 'Paso 2: Verifica el código y define nueva clave'
+                      : 'Acceso restablecido'}
+                  </p>
+                </div>
+              </div>
               <button
-                onClick={() => setShowForgotModal(false)}
-                className="w-8 h-8 rounded-full bg-[#f6eddb] hover:bg-[#ebe2cf] text-[#4d4632] flex items-center justify-center"
+                type="button"
+                onClick={closeForgotModal}
+                className="w-8 h-8 rounded-full bg-[#f6eddb] hover:bg-[#ebe2cf] text-[#4d4632] flex items-center justify-center cursor-pointer"
               >
                 ✕
               </button>
             </div>
 
-            {forgotSent ? (
-              <div className="py-8 text-center space-y-2">
-                <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center mx-auto mb-3">
+            {forgotError && (
+              <div className="mt-4 p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-800 flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+                <span>{forgotError}</span>
+              </div>
+            )}
+
+            {forgotStep === 'done' ? (
+              <div className="py-6 text-center space-y-3">
+                <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center mx-auto">
                   <CheckCircle2 className="w-6 h-6" />
                 </div>
                 <h4 className="text-lg font-bold text-[#1f1b10]">
-                  ¡Enlace de recuperación enviado!
+                  ¡Contraseña actualizada!
                 </h4>
-                <p className="text-xs text-[#7f765f]">
-                  Revisa tu bandeja de entrada en {forgotEmail} para restablecer tu clave.
+                <p className="text-xs text-[#4d4632] leading-relaxed">
+                  Tu contraseña para <strong>{forgotEmail}</strong> ha sido restablecida correctamente. Ya puedes iniciar sesión con tu nueva clave.
                 </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLoginEmail(forgotEmail.trim());
+                    setLoginPassword('');
+                    setLoginError('');
+                    closeForgotModal();
+                  }}
+                  className="mt-2 w-full py-3 rounded-full bg-[#ffd100] hover:bg-[#ffc800] text-[#1f1b10] text-xs font-black transition-colors cursor-pointer"
+                >
+                  Ir a Iniciar Sesión
+                </button>
               </div>
+            ) : forgotStep === 'verify' ? (
+              <form onSubmit={handleConfirmResetPassword} className="py-5 space-y-4">
+                <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-900 space-y-1.5">
+                  <div className="flex items-center gap-1.5 font-bold">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span>
+                      Código enviado a {forgotEmail}
+                      {forgotEmailResult?.provider ? ` (${forgotEmailResult.provider})` : ''}
+                    </span>
+                  </div>
+                  {forgotEmailResult?.redirected && forgotEmailResult?.redirectedTo && (
+                    <p className="text-[11px] text-amber-800">
+                      Sandbox activo: redirigido a <strong>{forgotEmailResult.redirectedTo}</strong>.
+                    </p>
+                  )}
+                  {forgotEmailResult?.previewUrl && (
+                    <a
+                      href={forgotEmailResult.previewUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white border border-emerald-300 text-[#0d4788] font-bold text-[11px] hover:bg-[#fff8f0]"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                      <span>Abrir correo con el código de 6 dígitos</span>
+                    </a>
+                  )}
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs font-semibold text-[#1f1b10]">
+                      Código de verificación (6 dígitos) *
+                    </label>
+                    <button
+                      type="button"
+                      disabled={forgotLoading}
+                      onClick={() => handleRequestResetCode()}
+                      className="text-[11px] font-bold text-[#725c00] hover:underline inline-flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                    >
+                      <RefreshCw className="w-3 h-3" />
+                      <span>Reenviar</span>
+                    </button>
+                  </div>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    maxLength={6}
+                    required
+                    value={forgotCode}
+                    onChange={(e) => setForgotCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    placeholder="Ej: 482910"
+                    className="w-full rounded-lg border border-[#d1c6ab] bg-white py-2.5 px-3 text-center font-mono tracking-[0.35em] text-base font-bold text-[#1f1b10] focus:border-[#725c00] focus:ring-1 focus:ring-[#ffd100] outline-hidden"
+                  />
+                </div>
+
+                <div>
+                  <label className="block mb-1.5 text-xs font-semibold text-[#1f1b10]">
+                    Nueva Contraseña *
+                  </label>
+                  <input
+                    type="password"
+                    required
+                    minLength={6}
+                    value={forgotNewPass}
+                    onChange={(e) => setForgotNewPass(e.target.value)}
+                    placeholder="Mínimo 6 caracteres"
+                    className="w-full rounded-lg border border-[#d1c6ab] bg-white py-2.5 px-3 text-sm text-[#1f1b10] focus:border-[#725c00] focus:ring-1 focus:ring-[#ffd100] outline-hidden"
+                  />
+                </div>
+
+                <div>
+                  <label className="block mb-1.5 text-xs font-semibold text-[#1f1b10]">
+                    Confirmar Nueva Contraseña *
+                  </label>
+                  <input
+                    type="password"
+                    required
+                    minLength={6}
+                    value={forgotConfirmPass}
+                    onChange={(e) => setForgotConfirmPass(e.target.value)}
+                    placeholder="Repite la nueva contraseña"
+                    className="w-full rounded-lg border border-[#d1c6ab] bg-white py-2.5 px-3 text-sm text-[#1f1b10] focus:border-[#725c00] focus:ring-1 focus:ring-[#ffd100] outline-hidden"
+                  />
+                </div>
+
+                <div className="flex justify-between items-center gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setForgotStep('request');
+                      setForgotError('');
+                    }}
+                    className="px-4 py-2 rounded-full border border-[#d1c6ab] text-xs font-bold text-[#4d4632] hover:bg-[#f6eddb] cursor-pointer"
+                  >
+                    Cambiar correo
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={forgotLoading}
+                    className="px-5 py-2.5 rounded-full bg-[#ffd100] text-[#1f1b10] hover:bg-[#ffc800] text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  >
+                    {forgotLoading ? (
+                      <>
+                        <div className="w-3.5 h-3.5 border-2 border-[#1f1b10] border-t-transparent rounded-full animate-spin" />
+                        <span>Actualizando...</span>
+                      </>
+                    ) : (
+                      <span>Restablecer Contraseña</span>
+                    )}
+                  </button>
+                </div>
+              </form>
             ) : (
-              <form onSubmit={handleForgotSubmit} className="py-5 space-y-4">
+              <form onSubmit={handleRequestResetCode} className="py-5 space-y-4">
                 <p className="text-xs sm:text-sm text-[#4d4632] leading-relaxed">
-                  Ingresa tu correo registrado y te enviaremos las instrucciones para restablecer tu acceso.
+                  Ingresa tu correo registrado y te enviaremos un código de 6 dígitos para restablecer tu acceso de forma segura.
                 </p>
                 <div>
                   <label className="block mb-1.5 text-xs font-semibold text-[#1f1b10]">
@@ -943,16 +1170,24 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                 <div className="flex justify-end gap-2 pt-2">
                   <button
                     type="button"
-                    onClick={() => setShowForgotModal(false)}
-                    className="px-4 py-2 rounded-full border border-[#d1c6ab] text-xs font-bold text-[#4d4632] hover:bg-[#f6eddb]"
+                    onClick={closeForgotModal}
+                    className="px-4 py-2 rounded-full border border-[#d1c6ab] text-xs font-bold text-[#4d4632] hover:bg-[#f6eddb] cursor-pointer"
                   >
                     Cancelar
                   </button>
                   <button
                     type="submit"
-                    className="px-5 py-2 rounded-full bg-[#ffd100] text-[#1f1b10] hover:bg-[#ffc800] text-xs font-bold transition-colors"
+                    disabled={forgotLoading}
+                    className="px-5 py-2.5 rounded-full bg-[#ffd100] text-[#1f1b10] hover:bg-[#ffc800] text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
                   >
-                    Enviar Instrucciones
+                    {forgotLoading ? (
+                      <>
+                        <div className="w-3.5 h-3.5 border-2 border-[#1f1b10] border-t-transparent rounded-full animate-spin" />
+                        <span>Enviando código...</span>
+                      </>
+                    ) : (
+                      <span>Enviar Código</span>
+                    )}
                   </button>
                 </div>
               </form>

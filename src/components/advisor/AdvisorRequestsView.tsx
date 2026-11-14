@@ -196,7 +196,13 @@ export const AdvisorRequestsView: React.FC<AdvisorRequestsViewProps> = ({
     saveProjectToDb(updated).catch((err) => console.warn('Error actualizando proyecto en BD:', err));
 
     // Asynchronously send project status update email to the customer
-    sendProjectStatusNotification(updated, newStatus, statusModalRequest.status);
+    sendProjectStatusNotification(updated, newStatus, statusModalRequest.status).then((res) => {
+      if (res.success && res.result?.success) {
+        onShowToast(
+          `Estado de ${updated.id} actualizado a "${newStatus}" • Correo enviado al cliente (${res.result.provider || 'SMTP'})`
+        );
+      }
+    });
     onShowToast(`Estado del expediente ${updated.id} actualizado a: "${newStatus}"`);
     setStatusModalRequest(null);
   };

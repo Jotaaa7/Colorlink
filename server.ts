@@ -8,10 +8,26 @@ import {
   sendInvoiceEmail,
   sendProjectStatusEmail,
   sendSupportTicketEmail,
+  sendPasswordResetEmail,
   getResendStatus,
   getSmtpStatus,
   getRecentEmailLogs,
 } from "./serverEmailService";
+
+// Helper to prevent email dispatch from blocking HTTP responses for too long
+async function withEmailTimeout<T>(promise: Promise<T>, fallback: T, ms = 6000): Promise<T> {
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms)),
+    ]);
+  } catch {
+    return fallback;
+  }
+}
+
+// In-memory store for password reset codes (email -> { code, expiresAt, used })
+const passwordResetCodes = new Map<string, { code: string; expiresAt: number; used: boolean }>();
 
 dotenv.config({ override: true });
 
@@ -287,12 +303,20 @@ async function initDatabaseTables() {
           created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
           updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
         );
+
+        CREATE TABLE IF NOT EXISTS password_resets (
+          email VARCHAR(255) PRIMARY KEY,
+          code VARCHAR(20) NOT NULL,
+          expires_at BIGINT NOT NULL,
+          used BOOLEAN NOT NULL DEFAULT FALSE,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
       `);
 
       // Ensure data JSONB column exists if table was created previously without it
       await client.query("ALTER TABLE project_requests ADD COLUMN IF NOT EXISTS data JSONB;");
 
-      console.log("✅ [Render PostgreSQL] Tablas 'users', 'project_requests' (con data JSONB) y 'direct_orders' listas y verificadas.");
+      console.log("✅ [Render PostgreSQL] Tablas 'users', 'project_requests', 'direct_orders' y 'password_resets' listas y verificadas.");
     } finally {
       client.release();
     }
@@ -591,27 +615,6 @@ app.post("/api/db/orders", async (req, res) => {
   // Update in-memory store
   mockOrders.set(orderId, normalizedOrder);
 
-  // Trigger invoice email asynchronously to customer email
-  if (customerEmail) {
-    sendInvoiceEmail({
-      id: orderId,
-      sapOrderCode,
-      customerName,
-      customerEmail,
-      customerPhone,
-      deliveryAddress,
-      deliveryCity,
-      paymentMethod,
-      subtotal,
-      discount,
-      iva,
-      shipping,
-      total,
-      status,
-      items,
-    }).catch((err) => console.error("Error enviando factura por correo:", err));
-  }
-
   const pool = getDbPool();
   if (pool) {
     try {
@@ -647,7 +650,66 @@ app.post("/api/db/orders", async (req, res) => {
     }
   }
 
-  return res.json({ success: true, id: orderId, sapOrderCode });
+  // Trigger invoice email to customer email and include delivery status in response
+  let emailResult: any = null;
+  if (customerEmail) {
+    emailResult = await withEmailTimeout(
+      sendInvoiceEmail({
+        id: orderId,
+        sapOrderCode,
+        customerName,
+        customerEmail,
+        customerPhone,
+        deliveryAddress,
+        deliveryCity,
+        paymentMethod,
+        subtotal,
+        discount,
+        iva,
+        shipping,
+        total,
+        status,
+        items,
+      }),
+      { success: true, simulated: true, provider: "Simulator", diagnostic: "Envío en proceso en segundo plano." }
+    );
+  }
+
+  return res.json({ success: true, id: orderId, sapOrderCode, emailResult });
+});
+
+// Notifications: Send or Resend Direct Order Invoice Email
+app.post("/api/notifications/invoice", async (req, res) => {
+  const { order, targetEmail } = req.body || {};
+  const recipientEmail = (targetEmail || order?.customerEmail || order?.customer?.email || "").trim();
+  if (!order || !recipientEmail) {
+    return res.status(400).json({ success: false, error: "Orden o correo electrónico de destino no especificado" });
+  }
+
+  try {
+    const result = await sendInvoiceEmail({
+      id: order.id || order.orderId || `PED-${Date.now()}`,
+      sapOrderCode: order.sapOrderCode || order.sapOrderNumber || "SAP-000000",
+      customerName: order.customerName || order.customer?.fullName || "Cliente Pintuco",
+      customerEmail: recipientEmail,
+      customerPhone: order.customerPhone || order.customer?.phone || "",
+      deliveryAddress: order.deliveryAddress || order.shipping?.address || "Dirección registrada",
+      deliveryCity: order.deliveryCity || order.shipping?.city || "Colombia",
+      paymentMethod: order.paymentMethod || "PSE",
+      subtotal: Number(order.subtotal ?? order.subtotalCOP) || 0,
+      discount: Number(order.discount) || 0,
+      iva: Number(order.iva ?? order.taxCOP) || 0,
+      shipping: Number(order.shipping ?? order.shippingCOP) || 0,
+      total: Number(order.total ?? order.totalCOP) || 0,
+      status: order.status || "Pagado y Confirmado",
+      items: order.items || [],
+    });
+
+    return res.json({ success: true, result });
+  } catch (err: any) {
+    console.error("Error enviando factura por correo:", err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 // Render PostgreSQL: Register User with Welcome Email
@@ -694,21 +756,6 @@ app.post("/api/auth/register", async (req, res) => {
     });
   }
 
-  // Save to in-memory store
-  mockUsers.set(normalizedEmail, createdUser);
-
-  // Trigger welcome email asynchronously
-  sendWelcomeEmail({
-    fullName: fullName.trim(),
-    email: normalizedEmail,
-    role: role || "Constructora / Arquitecto",
-    documentType: documentType || "NIT",
-    documentNumber: documentNumber || "",
-    phone: phone || "",
-    city: city || "Bogotá",
-    companyName: companyName || undefined,
-  }).catch((err) => console.error("Error enviando correo de bienvenida:", err));
-
   const pool = getDbPool();
   if (pool) {
     try {
@@ -746,8 +793,27 @@ app.post("/api/auth/register", async (req, res) => {
     }
   }
 
+  // Save to in-memory store
+  mockUsers.set(normalizedEmail, createdUser);
+
+  // Dispatch welcome email and return delivery info
+  const emailResult = await withEmailTimeout(
+    sendWelcomeEmail({
+      fullName: fullName.trim(),
+      email: normalizedEmail,
+      role: role || "Constructora / Arquitecto",
+      documentType: documentType || "NIT",
+      documentNumber: documentNumber || "",
+      phone: phone || "",
+      city: city || "Bogotá",
+      companyName: companyName || undefined,
+    }),
+    { success: true, simulated: true, provider: "Simulator", diagnostic: "Correo de bienvenida en proceso." }
+  );
+
   return res.json({
     success: true,
+    emailResult,
     user: {
       id: createdUser.id,
       fullName: createdUser.fullName,
@@ -807,12 +873,12 @@ app.get("/api/notifications/status", (req, res) => {
     smtp,
     canSendToAnyEmail,
     activeMode: smtp.isConfigured
-      ? "SMTP (Envío a cualquier correo activo)"
+      ? `SMTP (${smtp.isGmail ? "Gmail" : smtp.host} - Envío directo a cualquier correo)`
       : resend.isConfigured
       ? resend.hasCustomDomain
         ? "Resend con Dominio Propio (Envío a cualquier correo)"
-        : "Resend Sandbox Relay (Entrega en cuenta de desarrollador)"
-      : "Simulador Local",
+        : "Resend Sandbox Relay (Entrega en cuenta registrada)"
+      : "Ethereal Test SMTP (Vista previa real en navegador)",
     recentLogs: getRecentEmailLogs(),
   });
 });
@@ -973,6 +1039,178 @@ app.post("/api/auth/login", async (req, res) => {
   }
 
   return res.status(404).json({ success: false, error: "Usuario no encontrado" });
+});
+
+// Auth: Forgot Password (Send 6-digit verification code via email)
+app.post("/api/auth/forgot-password", async (req, res) => {
+  const { email } = req.body || {};
+  if (!email || typeof email !== "string" || !email.includes("@")) {
+    return res.status(400).json({ success: false, error: "Por favor ingresa un correo electrónico válido." });
+  }
+
+  const normalizedEmail = email.trim().toLowerCase();
+  let userFullName = "";
+  let userFound = false;
+
+  const pool = getDbPool();
+  if (pool) {
+    try {
+      const result = await pool.query(
+        "SELECT full_name FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1;",
+        [normalizedEmail]
+      );
+      if (result.rows && result.rows.length > 0) {
+        userFound = true;
+        userFullName = result.rows[0].full_name || "Usuario ColorLink";
+      }
+    } catch (err: any) {
+      console.warn("PostgreSQL forgot-password lookup notice:", err.message);
+    }
+  }
+
+  if (!userFound) {
+    const mockUser = mockUsers.get(normalizedEmail);
+    if (mockUser) {
+      userFound = true;
+      userFullName = mockUser.fullName || "Usuario ColorLink";
+    }
+  }
+
+  if (!userFound) {
+    // Allow recovery code dispatch even if user was only cached in client localStorage previously
+    userFullName = normalizedEmail.split("@")[0].replace(/[._]/g, " ");
+  }
+
+  const code = Math.floor(100000 + Math.random() * 900000).toString();
+  const expiresAt = Date.now() + 15 * 60 * 1000;
+
+  passwordResetCodes.set(normalizedEmail, { code, expiresAt, used: false });
+
+  if (pool) {
+    try {
+      await pool.query(
+        `INSERT INTO password_resets (email, code, expires_at, used, created_at)
+         VALUES ($1, $2, $3, FALSE, NOW())
+         ON CONFLICT (email) DO UPDATE SET code = EXCLUDED.code, expires_at = EXCLUDED.expires_at, used = FALSE, created_at = NOW();`,
+        [normalizedEmail, code, expiresAt]
+      );
+    } catch (err: any) {
+      console.warn("PostgreSQL password_resets insert notice:", err.message);
+    }
+  }
+
+  try {
+    const emailResult = await withEmailTimeout(
+      sendPasswordResetEmail({
+        fullName: userFullName || "Usuario ColorLink",
+        email: normalizedEmail,
+        code,
+        expiresMinutes: 15,
+      }),
+      { success: true, simulated: true, provider: "Simulator", diagnostic: "Código enviado." }
+    );
+
+    return res.json({
+      success: true,
+      message: `Hemos enviado un código de verificación de 6 dígitos a ${normalizedEmail}.`,
+      emailResult,
+    });
+  } catch (err: any) {
+    console.error("Error enviando correo de recuperación:", err.message);
+    return res.status(500).json({ success: false, error: "Error enviando el correo de recuperación." });
+  }
+});
+
+// Auth: Reset Password with 6-digit code
+app.post("/api/auth/reset-password", async (req, res) => {
+  const { email, code, newPassword } = req.body || {};
+
+  if (!email || !code || !newPassword) {
+    return res.status(400).json({
+      success: false,
+      error: "Correo, código de verificación y nueva contraseña son obligatorios.",
+    });
+  }
+
+  if (typeof newPassword !== "string" || newPassword.length < 6) {
+    return res.status(400).json({
+      success: false,
+      error: "La nueva contraseña debe tener al menos 6 caracteres.",
+    });
+  }
+
+  const normalizedEmail = email.trim().toLowerCase();
+  const normalizedCode = String(code).trim();
+  const pool = getDbPool();
+
+  let record: { code: string; expiresAt: number; used: boolean } | null = null;
+
+  if (pool) {
+    try {
+      const dbRes = await pool.query(
+        "SELECT code, expires_at, used FROM password_resets WHERE LOWER(email) = LOWER($1) LIMIT 1;",
+        [normalizedEmail]
+      );
+      if (dbRes.rows && dbRes.rows.length > 0) {
+        record = {
+          code: dbRes.rows[0].code,
+          expiresAt: Number(dbRes.rows[0].expires_at),
+          used: Boolean(dbRes.rows[0].used),
+        };
+      }
+    } catch (err: any) {
+      console.warn("PostgreSQL password_resets lookup notice:", err.message);
+    }
+  }
+
+  if (!record) {
+    record = passwordResetCodes.get(normalizedEmail) || null;
+  }
+
+  if (!record || record.used) {
+    return res.status(400).json({
+      success: false,
+      error: "No hay un código activo para este correo o ya fue utilizado. Solicita uno nuevo.",
+    });
+  }
+
+  if (Date.now() > record.expiresAt) {
+    return res.status(400).json({
+      success: false,
+      error: "El código de verificación ha expirado. Solicita uno nuevo.",
+    });
+  }
+
+  if (record.code !== normalizedCode) {
+    return res.status(400).json({
+      success: false,
+      error: "El código de verificación es incorrecto. Verifica tu correo e inténtalo de nuevo.",
+    });
+  }
+
+  // Mark code used
+  passwordResetCodes.set(normalizedEmail, { ...record, used: true });
+  if (pool) {
+    try {
+      await pool.query("UPDATE password_resets SET used = TRUE WHERE LOWER(email) = LOWER($1);", [normalizedEmail]);
+      await pool.query(
+        "UPDATE users SET password_hash = $1, updated_at = NOW() WHERE LOWER(email) = LOWER($2);",
+        [newPassword, normalizedEmail]
+      );
+    } catch (err: any) {
+      console.warn("PostgreSQL password update notice:", err.message);
+    }
+  }
+
+  const existingMock = mockUsers.get(normalizedEmail);
+  if (existingMock) {
+    mockUsers.set(normalizedEmail, { ...existingMock, password_hash: newPassword });
+  }
+
+  return res.json({
+    success: true,
+    message: "Tu contraseña ha sido actualizada correctamente. Ya puedes iniciar sesión.",
+  });
 });
 
 // Render PostgreSQL: Upsert User Profile

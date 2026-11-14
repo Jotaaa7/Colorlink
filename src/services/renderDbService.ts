@@ -95,19 +95,71 @@ export async function fetchOrdersFromDb(): Promise<DirectOrder[] | null> {
 /**
  * Persists a direct store order in Render PostgreSQL
  */
-export async function saveOrderToDb(order: DirectOrder): Promise<boolean> {
+export interface EmailDeliveryResult {
+  success: boolean;
+  simulated?: boolean;
+  provider?: 'Resend' | 'SMTP' | 'Ethereal' | 'Simulator' | string;
+  messageId?: string;
+  previewUrl?: string;
+  error?: string;
+  diagnostic?: string;
+  redirected?: boolean;
+  redirectedTo?: string;
+  originalTo?: string;
+}
+
+export interface SaveOrderResponse {
+  success: boolean;
+  id?: string;
+  sapOrderCode?: string;
+  emailResult?: EmailDeliveryResult | null;
+}
+
+/**
+ * Persists a direct store order in Render PostgreSQL and sends invoice email
+ */
+export async function saveOrderToDb(order: DirectOrder): Promise<SaveOrderResponse> {
   try {
     const res = await fetch('/api/db/orders', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(order),
     });
-    if (!res.ok) return false;
+    if (!res.ok) return { success: false };
     const data = await res.json();
-    return !!data.success;
+    return {
+      success: !!data.success,
+      id: data.id,
+      sapOrderCode: data.sapOrderCode,
+      emailResult: data.emailResult || null,
+    };
   } catch (err) {
     console.warn('[RenderDb] Error guardando orden en PostgreSQL:', err);
-    return false;
+    return { success: false };
+  }
+}
+
+/**
+ * Sends or resends an electronic invoice email for a direct store order
+ */
+export async function sendOrderInvoiceNotification(
+  order: DirectOrder,
+  targetEmail?: string
+): Promise<{ success: boolean; result?: EmailDeliveryResult; error?: string }> {
+  try {
+    const res = await fetch('/api/notifications/invoice', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order, targetEmail }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      return { success: false, error: data.error || 'No se pudo enviar la factura por correo' };
+    }
+    return { success: !!data.success, result: data.result };
+  } catch (err: any) {
+    console.warn('[EmailNotification] Error enviando factura:', err);
+    return { success: false, error: 'Error de conexión al enviar la factura' };
   }
 }
 
@@ -127,12 +179,13 @@ export interface RegisterUserData {
 export interface AuthResponse {
   success: boolean;
   user?: any;
+  emailResult?: EmailDeliveryResult;
   error?: string;
   fallback?: boolean;
 }
 
 /**
- * Registers a new user directly in Render PostgreSQL
+ * Registers a new user directly in Render PostgreSQL (triggers welcome email)
  */
 export async function registerUserInDb(userData: RegisterUserData): Promise<AuthResponse> {
   try {
@@ -170,6 +223,54 @@ export async function loginUserInDb(email: string, password?: string): Promise<A
   } catch (err: any) {
     console.warn('[RenderDb] Error en login de usuario:', err);
     return { success: false, error: 'No se pudo verificar el usuario en la base de datos' };
+  }
+}
+
+/**
+ * Requests a 6-digit password reset code sent by email
+ */
+export async function requestPasswordReset(
+  email: string
+): Promise<{ success: boolean; message?: string; error?: string; emailResult?: EmailDeliveryResult }> {
+  try {
+    const res = await fetch('/api/auth/forgot-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      return { success: false, error: data.error || 'No se pudo procesar la recuperación de contraseña' };
+    }
+    return data;
+  } catch (err: any) {
+    console.warn('[Auth] Error solicitando recuperación de contraseña:', err);
+    return { success: false, error: 'Error de conexión con el servidor' };
+  }
+}
+
+/**
+ * Verifies the 6-digit reset code and sets a new password
+ */
+export async function confirmPasswordReset(
+  email: string,
+  code: string,
+  newPassword: string
+): Promise<{ success: boolean; message?: string; error?: string }> {
+  try {
+    const res = await fetch('/api/auth/reset-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, code, newPassword }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      return { success: false, error: data.error || 'No se pudo restablecer la contraseña' };
+    }
+    return data;
+  } catch (err: any) {
+    console.warn('[Auth] Error confirmando nueva contraseña:', err);
+    return { success: false, error: 'Error de conexión con el servidor' };
   }
 }
 
@@ -217,7 +318,7 @@ export async function sendProjectStatusNotification(
   project: ProjectRequest,
   newStatus: string,
   previousStatus?: string
-): Promise<boolean> {
+): Promise<{ success: boolean; result?: EmailDeliveryResult }> {
   try {
     const res = await fetch('/api/notifications/project-status', {
       method: 'POST',
@@ -228,12 +329,12 @@ export async function sendProjectStatusNotification(
         previousStatus,
       }),
     });
-    if (!res.ok) return false;
+    if (!res.ok) return { success: false };
     const data = await res.json();
-    return !!data.success;
+    return { success: !!data.success, result: data.result };
   } catch (err) {
     console.warn('[EmailNotification] Error enviando notificación de estado:', err);
-    return false;
+    return { success: false };
   }
 }
 

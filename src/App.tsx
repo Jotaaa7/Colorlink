@@ -534,7 +534,7 @@ export default function App() {
         console.warn('Render DB request save notice:', err)
       );
       // Dispatch email notification to the user
-      sendProjectStatusNotification(completedRequest, 'Registrada').catch((err) =>
+      sendProjectStatusNotification(completedRequest, completedRequest.status || 'Cotizada').catch((err) =>
         console.warn('Project notification notice:', err)
       );
       setActiveTab('project_status');

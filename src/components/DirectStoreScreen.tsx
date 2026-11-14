@@ -33,9 +33,10 @@ import {
   Phone,
   Mail,
   User,
+  Send,
 } from 'lucide-react';
 import { ColorSelectorModal, ColorSelectionResult } from './ColorSelectorModal';
-import { saveOrderToDb, fetchOrdersFromDb } from '../services/renderDbService';
+import { saveOrderToDb, fetchOrdersFromDb, sendOrderInvoiceNotification } from '../services/renderDbService';
 
 interface DirectStoreScreenProps {
   currentUser: UserProfile | null;
@@ -95,6 +96,15 @@ export const DirectStoreScreen: React.FC<DirectStoreScreenProps> = ({
   const [selectedProductSpec, setSelectedProductSpec] = useState<PintucoCatalogItem | null>(null);
   const [confirmedOrder, setConfirmedOrder] = useState<DirectOrder | null>(null);
   const [notificationToast, setNotificationToast] = useState<string | null>(null);
+  const [invoiceEmailStatus, setInvoiceEmailStatus] = useState<{
+    loading: boolean;
+    sentTo?: string;
+    provider?: string;
+    previewUrl?: string;
+    redirected?: boolean;
+    redirectedTo?: string;
+    error?: string;
+  } | null>(null);
 
   // Per-product selection state maps (SKU -> state)
   const [productPresentations, setProductPresentations] = useState<Record<string, 'Cuarto (1/4 Gal)' | 'Galón (1 Gal)' | 'Caneca (5 Gal)' | 'Unidad / Kit'>>({});
@@ -386,15 +396,73 @@ export const DirectStoreScreen: React.FC<DirectStoreScreenProps> = ({
 
       setOrdersHistory((prev) => [newOrder, ...prev]);
       setConfirmedOrder(newOrder);
-      // Persist to Render PostgreSQL database
-      saveOrderToDb(newOrder).catch((err) =>
-        console.warn('PostgreSQL order save notice:', err)
-      );
+      setInvoiceEmailStatus({
+        loading: true,
+        sentTo: newOrder.customer.email,
+      });
+
+      // Persist to Render PostgreSQL database & send invoice email
+      saveOrderToDb(newOrder)
+        .then((res) => {
+          const er = res.emailResult;
+          if (er) {
+            setInvoiceEmailStatus({
+              loading: false,
+              sentTo: newOrder.customer.email,
+              provider: er.provider,
+              previewUrl: er.previewUrl,
+              redirected: er.redirected,
+              redirectedTo: er.redirectedTo,
+              error: er.success ? undefined : er.error || 'No se pudo enviar la factura',
+            });
+          } else {
+            setInvoiceEmailStatus({
+              loading: false,
+              sentTo: newOrder.customer.email,
+            });
+          }
+        })
+        .catch((err) => {
+          console.warn('PostgreSQL order save notice:', err);
+          setInvoiceEmailStatus({
+            loading: false,
+            sentTo: newOrder.customer.email,
+            error: 'No se pudo confirmar el envío automático; puedes reenviar manualmente.',
+          });
+        });
+
       setCartItems([]);
       setIsProcessingCheckout(false);
       setIsCheckoutOpen(false);
       triggerToast(`¡Pedido ${newOrder.orderId} emitido exitosamente!`);
     }, 1200);
+  };
+
+  const handleResendInvoiceEmail = async (order: DirectOrder) => {
+    setInvoiceEmailStatus({
+      loading: true,
+      sentTo: order.customer.email,
+    });
+    const res = await sendOrderInvoiceNotification(order);
+    if (res.success && res.result) {
+      setInvoiceEmailStatus({
+        loading: false,
+        sentTo: order.customer.email,
+        provider: res.result.provider,
+        previewUrl: res.result.previewUrl,
+        redirected: res.result.redirected,
+        redirectedTo: res.result.redirectedTo,
+        error: res.result.success ? undefined : res.result.error,
+      });
+      triggerToast(`Factura electrónica reenviada a ${order.customer.email}`);
+    } else {
+      setInvoiceEmailStatus({
+        loading: false,
+        sentTo: order.customer.email,
+        error: res.error || 'No se pudo reenviar la factura por correo.',
+      });
+      triggerToast(res.error || 'Error enviando la factura');
+    }
   };
 
   // Color modal selection applied to catalog item
@@ -872,7 +940,10 @@ export const DirectStoreScreen: React.FC<DirectStoreScreenProps> = ({
 
                           <button
                             type="button"
-                            onClick={() => setConfirmedOrder(ord)}
+                            onClick={() => {
+                              setInvoiceEmailStatus(null);
+                              setConfirmedOrder(ord);
+                            }}
                             className="px-3.5 py-2 rounded-xl bg-white hover:bg-[#ebe2cf] text-[#1f1b10] text-xs font-bold transition-colors border border-[#d1c6ab] flex items-center gap-1.5 cursor-pointer"
                           >
                             <FileText className="w-4 h-4 text-[#2f5ea1]" />
@@ -1492,6 +1563,59 @@ export const DirectStoreScreen: React.FC<DirectStoreScreenProps> = ({
                     {formatCOP(confirmedOrder.totalCOP)}
                   </span>
                 </div>
+              </div>
+
+              {/* Electronic Invoice Email Status */}
+              <div className="p-3.5 rounded-xl bg-[#f8fafc] border border-[#cbd5e1] space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 text-xs font-bold text-[#0d4788]">
+                    <Mail className="w-4 h-4 shrink-0" />
+                    <span>Factura Electrónica por Correo</span>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={invoiceEmailStatus?.loading}
+                    onClick={() => handleResendInvoiceEmail(confirmedOrder)}
+                    className="px-3 py-1 rounded-lg bg-white hover:bg-[#f1f5f9] border border-[#cbd5e1] text-[11px] font-bold text-[#0d4788] flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                  >
+                    <Send className="w-3 h-3" />
+                    <span>{invoiceEmailStatus?.loading ? 'Enviando...' : 'Reenviar Factura'}</span>
+                  </button>
+                </div>
+
+                {invoiceEmailStatus?.loading ? (
+                  <p className="text-[11px] text-[#475569]">
+                    Despachando factura electrónica a <strong>{confirmedOrder.customer.email}</strong>...
+                  </p>
+                ) : invoiceEmailStatus?.error ? (
+                  <p className="text-[11px] text-rose-700">{invoiceEmailStatus.error}</p>
+                ) : invoiceEmailStatus?.provider ? (
+                  <div className="space-y-1.5 text-[11px] text-emerald-800">
+                    <p>
+                      Factura enviada a <strong>{invoiceEmailStatus.sentTo}</strong> vía{' '}
+                      <strong>{invoiceEmailStatus.provider}</strong>
+                      {invoiceEmailStatus.redirected && invoiceEmailStatus.redirectedTo
+                        ? ` (Sandbox -> ${invoiceEmailStatus.redirectedTo})`
+                        : ''}
+                      .
+                    </p>
+                    {invoiceEmailStatus.previewUrl && (
+                      <a
+                        href={invoiceEmailStatus.previewUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white border border-emerald-300 text-[#0d4788] font-bold hover:bg-[#fff8f0]"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                        <span>Ver factura enviada en el navegador</span>
+                      </a>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-[#475569]">
+                    Destinatario registrado: <strong>{confirmedOrder.customer.email}</strong>. Usa &quot;Reenviar Factura&quot; para enviar una copia inmediata.
+                  </p>
+                )}
               </div>
             </div>
 

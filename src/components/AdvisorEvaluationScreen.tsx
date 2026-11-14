@@ -214,7 +214,13 @@ export const AdvisorEvaluationScreen: React.FC<AdvisorEvaluationScreenProps> = (
       onUpdateProject(updatedRequest);
     }
     // Asynchronously dispatch email notification to the customer
-    sendProjectStatusNotification(updatedRequest, newStatus, previousStatus);
+    sendProjectStatusNotification(updatedRequest, newStatus, previousStatus).then((res) => {
+      if (res.success && res.result?.success) {
+        triggerToast(
+          `Estado de ${projectCode} actualizado a "${newStatus}" • Correo enviado al cliente (${res.result.provider || 'SMTP'})`
+        );
+      }
+    });
     triggerToast(`Estado del proyecto ${projectCode} actualizado a: "${newStatus}" exitosamente`);
   };
 

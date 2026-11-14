@@ -40,6 +40,20 @@ interface SmtpStatusData {
   note: string;
 }
 
+interface EmailLogItem {
+  id: string;
+  timestamp: string;
+  to: string;
+  subject: string;
+  provider: string;
+  success: boolean;
+  messageId?: string;
+  previewUrl?: string;
+  error?: string;
+  diagnostic?: string;
+  redirected?: boolean;
+}
+
 export const SupportModal: React.FC<SupportModalProps> = ({ isOpen, onClose, currentUser }) => {
   const [activeTab, setActiveTab] = useState<'contact' | 'email_diagnostic'>('contact');
 
@@ -59,10 +73,12 @@ export const SupportModal: React.FC<SupportModalProps> = ({ isOpen, onClose, cur
   const [testEmail, setTestEmail] = useState(currentUser?.email || '');
   const [isTestingEmail, setIsTestingEmail] = useState(false);
   const [showGmailInstructions, setShowGmailInstructions] = useState(false);
+  const [recentLogs, setRecentLogs] = useState<EmailLogItem[]>([]);
   const [testResult, setTestResult] = useState<{
     success: boolean;
     message: string;
     provider?: string;
+    previewUrl?: string;
     error?: string;
     diagnostic?: string;
   } | null>(null);
@@ -77,6 +93,7 @@ export const SupportModal: React.FC<SupportModalProps> = ({ isOpen, onClose, cur
         if (data.smtp) setSmtpStatus(data.smtp);
         setCanSendToAnyEmail(Boolean(data.canSendToAnyEmail));
         if (data.activeMode) setActiveMode(data.activeMode);
+        if (Array.isArray(data.recentLogs)) setRecentLogs(data.recentLogs);
       }
     } catch (err) {
       console.warn('Error fetching notification status:', err);
@@ -162,6 +179,7 @@ export const SupportModal: React.FC<SupportModalProps> = ({ isOpen, onClose, cur
         success: Boolean(data.success),
         message: data.message || (data.success ? 'Correo entregado' : 'Error al enviar'),
         provider: data.providerUsed,
+        previewUrl: data.result?.previewUrl,
         error: data.result?.error,
         diagnostic: data.result?.diagnostic,
       });
@@ -388,33 +406,47 @@ export const SupportModal: React.FC<SupportModalProps> = ({ isOpen, onClose, cur
               className={`p-3.5 rounded-2xl border text-xs leading-relaxed flex items-start gap-3 ${
                 canSendToAnyEmail
                   ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
-                  : 'bg-amber-50 border-amber-200 text-amber-900'
+                  : resendStatus?.isConfigured
+                  ? 'bg-amber-50 border-amber-200 text-amber-900'
+                  : 'bg-sky-50 border-sky-200 text-sky-900'
               }`}
             >
               <div
                 className={`w-7 h-7 rounded-xl flex items-center justify-center shrink-0 mt-0.5 ${
-                  canSendToAnyEmail ? 'bg-emerald-200 text-emerald-800' : 'bg-amber-200 text-amber-800'
+                  canSendToAnyEmail
+                    ? 'bg-emerald-200 text-emerald-800'
+                    : resendStatus?.isConfigured
+                    ? 'bg-amber-200 text-amber-800'
+                    : 'bg-sky-200 text-sky-800'
                 }`}
               >
                 {canSendToAnyEmail ? (
                   <CheckCircle2 className="w-4 h-4" />
-                ) : (
+                ) : resendStatus?.isConfigured ? (
                   <AlertTriangle className="w-4 h-4" />
+                ) : (
+                  <Mail className="w-4 h-4" />
                 )}
               </div>
               <div className="flex-1">
                 <div className="font-black text-sm mb-0.5">
                   {canSendToAnyEmail
-                    ? '✅ Envíos a CUALQUIER Correo Habilitados'
-                    : '⚡ Modo Sandbox Resend Activo'}
+                    ? 'Envíos a CUALQUIER Correo Habilitados'
+                    : resendStatus?.isConfigured
+                    ? 'Modo Sandbox Resend Activo'
+                    : 'SMTP de Prueba en Vivo Activo (Ethereal)'}
                 </div>
                 {canSendToAnyEmail ? (
                   <p>
                     El sistema está configurado para entregar correos directamente a <strong>cualquier destinatario externo</strong> ({activeMode}).
                   </p>
+                ) : resendStatus?.isConfigured ? (
+                  <p>
+                    Con el remitente gratuito <code>onboarding@resend.dev</code>, Resend restringe el envío al correo del propietario registrado en la cuenta. Por eso, todas las notificaciones a clientes, cotizaciones y facturas <strong>se redirigen a dicha bandeja de entrada con el prefijo <code>[Para: cliente@...]</code></strong>.
+                  </p>
                 ) : (
                   <p>
-                    Con el remitente gratuito <code>onboarding@resend.dev</code>, Resend restringe el envío al correo del propietario registrado en la cuenta. Por eso, todas las notificaciones a clientes, cotizaciones y facturas <strong>se redirigen a dicha bandeja de entrada con el prefijo <code>[Para: cliente@...]</code></strong> para que las audites sin perder ninguna información.
+                    Todos los correos (bienvenida, recuperación de contraseña, facturas y actualizaciones de proyecto) se transmiten vía <strong>Ethereal SMTP</strong> con enlace de vista previa real abajo. Para entrega a bandejas Gmail/corporativas, configura <code>SMTP_*</code> o <code>RESEND_API_KEY</code> en tus variables de entorno.
                   </p>
                 )}
               </div>
@@ -614,11 +646,90 @@ SMTP_PASS=tu_clave_de_16_letras_sin_espacios`}
                           Proveedor utilizado: <strong>{testResult.provider}</strong>
                         </div>
                       )}
+                      {testResult.previewUrl && (
+                        <a
+                          href={testResult.previewUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1.5 mt-1 px-2.5 py-1 rounded-lg bg-white border border-emerald-300 text-[#0d4788] font-bold text-[11px] hover:bg-[#fff8f0]"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                          <span>Abrir correo enviado (Vista previa)</span>
+                        </a>
+                      )}
                     </div>
                   </div>
                 </div>
               )}
             </form>
+
+            {/* Recent Email Delivery Logs */}
+            <div className="p-4 rounded-2xl bg-white border border-[#ebe2cf] space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-[#1f1b10] uppercase tracking-wider">
+                  Historial Reciente de Correos ({recentLogs.length})
+                </span>
+                <button
+                  type="button"
+                  onClick={fetchStatus}
+                  className="text-[11px] font-bold text-[#0d4788] hover:underline flex items-center gap-1 cursor-pointer"
+                >
+                  <RefreshCw className="w-3 h-3" />
+                  <span>Actualizar</span>
+                </button>
+              </div>
+
+              {recentLogs.length === 0 ? (
+                <p className="text-xs text-[#7f765f] py-2">
+                  Aún no hay correos enviados en esta sesión. Registra una cuenta, solicita recuperación de contraseña, realiza una compra o envía un correo de prueba.
+                </p>
+              ) : (
+                <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                  {recentLogs.map((log) => (
+                    <div
+                      key={log.id}
+                      className="p-2.5 rounded-xl bg-[#fcf3e0]/60 border border-[#ebe2cf] text-xs flex items-start justify-between gap-2"
+                    >
+                      <div className="min-w-0 flex-1 space-y-0.5">
+                        <div className="font-bold text-[#1f1b10] truncate">{log.subject}</div>
+                        <div className="text-[11px] text-[#4d4632] truncate">
+                          Para: <strong>{log.to}</strong> •{' '}
+                          {new Date(log.timestamp).toLocaleTimeString('es-CO', {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                        </div>
+                        {log.error && (
+                          <div className="text-[10px] text-rose-700 truncate">{log.error}</div>
+                        )}
+                      </div>
+                      <div className="flex flex-col items-end gap-1 shrink-0">
+                        <span
+                          className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                            log.success
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : 'bg-rose-100 text-rose-800'
+                          }`}
+                        >
+                          {log.provider}
+                        </span>
+                        {log.previewUrl && (
+                          <a
+                            href={log.previewUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1 text-[10px] font-bold text-[#0d4788] hover:underline"
+                          >
+                            <ExternalLink className="w-3 h-3" />
+                            <span>Ver</span>
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>

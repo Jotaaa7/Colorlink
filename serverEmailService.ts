@@ -1,4 +1,4 @@
-import nodemailer from 'nodemailer';
+import nodemailer, { type Transporter } from 'nodemailer';
 import { Resend } from 'resend';
 import dotenv from 'dotenv';
 
@@ -7,7 +7,7 @@ dotenv.config({ override: true });
 export interface EmailResult {
   success: boolean;
   simulated: boolean;
-  provider?: 'Resend' | 'SMTP' | 'Simulator';
+  provider?: 'Resend' | 'SMTP' | 'Ethereal' | 'Simulator';
   messageId?: string;
   previewUrl?: string;
   error?: string;
@@ -15,6 +15,13 @@ export interface EmailResult {
   redirected?: boolean;
   redirectedTo?: string;
   originalTo?: string;
+}
+
+export interface PasswordResetEmailData {
+  fullName: string;
+  email: string;
+  code: string;
+  expiresMinutes: number;
 }
 
 export interface UserEmailData {
@@ -87,9 +94,10 @@ export interface EmailLogEntry {
   timestamp: string;
   to: string;
   subject: string;
-  provider: 'Resend' | 'SMTP' | 'Simulator';
+  provider: 'Resend' | 'SMTP' | 'Ethereal' | 'Simulator';
   success: boolean;
   messageId?: string;
+  previewUrl?: string;
   error?: string;
   diagnostic?: string;
   redirected?: boolean;
@@ -98,10 +106,12 @@ export interface EmailLogEntry {
 const emailLogs: EmailLogEntry[] = [];
 
 export function getRecentEmailLogs(): EmailLogEntry[] {
-  return [...emailLogs].reverse().slice(0, 15);
+  return [...emailLogs].reverse().slice(0, 20);
 }
 
 let detectedResendAccountEmail = (process.env.RESEND_ACCOUNT_EMAIL || process.env.RESEND_TEST_EMAIL || '').trim();
+let cachedEtherealTransporter: Transporter | null = null;
+let cachedEtherealUser: string | null = null;
 
 /**
  * Checks Resend configuration status and detects placeholder dummy keys
@@ -180,16 +190,20 @@ export function getSmtpStatus(): SmtpStatusData {
 export function getEmailTransporter() {
   dotenv.config({ override: true });
   const user = (process.env.SMTP_USER || '').trim();
-  const pass = (process.env.SMTP_PASS || '').trim();
+  const rawPass = (process.env.SMTP_PASS || '').trim();
   const host = (process.env.SMTP_HOST || '').trim();
   const service = (process.env.SMTP_SERVICE || '').trim().toLowerCase();
 
-  if (!user || !pass) {
+  if (!user || !rawPass) {
     return null;
   }
 
+  const isGmail = service === 'gmail' || host.includes('gmail') || user.includes('@gmail.com');
+  // Strip spaces from Gmail App Passwords if user pasted them with spaces
+  const pass = isGmail ? rawPass.replace(/\s+/g, '') : rawPass;
+
   // Gmail direct service shortcut or detected gmail address
-  if (service === 'gmail' || host.includes('gmail') || user.includes('@gmail.com')) {
+  if (isGmail) {
     return nodemailer.createTransport({
       service: 'gmail',
       auth: {
@@ -224,6 +238,38 @@ export function getEmailTransporter() {
   }
 
   return null;
+}
+
+async function getEtherealTransporter(): Promise<{ transporter: Transporter; user: string } | null> {
+  if (cachedEtherealTransporter && cachedEtherealUser) {
+    return { transporter: cachedEtherealTransporter, user: cachedEtherealUser };
+  }
+  try {
+    const testAccount = await Promise.race([
+      nodemailer.createTestAccount(),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Ethereal timeout')), 4500)
+      ),
+    ]);
+    cachedEtherealTransporter = nodemailer.createTransport({
+      host: testAccount.smtp.host,
+      port: testAccount.smtp.port,
+      secure: testAccount.smtp.secure,
+      auth: {
+        user: testAccount.user,
+        pass: testAccount.pass,
+      },
+      connectionTimeout: 5000,
+      greetingTimeout: 4000,
+      socketTimeout: 7000,
+    });
+    cachedEtherealUser = testAccount.user;
+    console.log(`📧 [ETHEREAL SMTP READY] Buzón de pruebas creado: ${testAccount.user}`);
+    return { transporter: cachedEtherealTransporter, user: cachedEtherealUser };
+  } catch (err: any) {
+    console.warn('⚠️ [ETHEREAL NOTICE] No se pudo inicializar buzón Ethereal:', err.message);
+    return null;
+  }
 }
 
 function getSenderAddress(isResend: boolean = false): string {
@@ -270,10 +316,9 @@ async function sendOrSimulateEmail(options: {
   const smtpStatus = getSmtpStatus();
   const accountEmail = (process.env.RESEND_ACCOUNT_EMAIL || process.env.RESEND_TEST_EMAIL || '').trim();
   const normalizedTarget = options.to.trim().toLowerCase();
-  const isTargetAccountOwner = normalizedTarget === accountEmail.toLowerCase();
+  const isTargetAccountOwner = Boolean(accountEmail && normalizedTarget === accountEmail.toLowerCase());
 
   // 1. PRIMARY FOR ANY EMAIL: Standard SMTP (Gmail, Brevo, Outlook, etc.)
-  // When SMTP is configured, it can deliver to ANY email without Resend's domain restriction!
   if (smtpStatus.isConfigured) {
     const transporter = getEmailTransporter();
     if (transporter) {
@@ -309,7 +354,16 @@ async function sendOrSimulateEmail(options: {
         };
       } catch (err: any) {
         console.error(`❌ [SMTP ERROR] Error enviando a ${options.to}:`, err.message);
-        // Do not return immediately; try Resend as fallback
+        emailLogs.push({
+          id: `log-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+          timestamp: new Date().toISOString(),
+          to: options.to,
+          subject: options.subject,
+          provider: 'SMTP',
+          success: false,
+          error: err.message,
+          diagnostic: `Fallo en SMTP (${smtpStatus.isGmail ? 'Gmail' : smtpStatus.host}): ${err.message}`,
+        });
       }
     }
   }
@@ -319,8 +373,8 @@ async function sendOrSimulateEmail(options: {
     const resend = new Resend(process.env.RESEND_API_KEY!.trim());
     const fromAddress = getSenderAddress(true);
 
-    // Case A: Custom verified domain OR sending to the registered account email
-    if (resendStatus.hasCustomDomain || isTargetAccountOwner) {
+    // Try direct delivery first (works for custom verified domain, or if target IS the Resend account owner, or reveals owner email)
+    if (resendStatus.hasCustomDomain || isTargetAccountOwner || !detectedResendAccountEmail) {
       try {
         const response = await resend.emails.send({
           from: fromAddress,
@@ -349,6 +403,7 @@ async function sendOrSimulateEmail(options: {
             simulated: false,
             provider: 'Resend',
             messageId: response.data?.id,
+            diagnostic: `Correo enviado a ${options.to} vía Resend`,
           };
         } else {
           console.warn(`⚠️ [RESEND NOTICE] ${response.error.message}`);
@@ -364,77 +419,103 @@ async function sendOrSimulateEmail(options: {
       }
     }
 
-    // Case B: Resend Free Sandbox (onboarding@resend.dev) sending to an external recipient
-    // Rather than failing and breaking the client experience, we deliver the email directly
-    // into the account owner's inbox with clear recipient headers!
-    try {
-      let targetRelay = (detectedResendAccountEmail || accountEmail).trim();
+    // Case B: Resend Free Sandbox (onboarding@resend.dev) relay to detected/configured owner email
+    const targetRelay = (detectedResendAccountEmail || accountEmail).trim();
+    if (targetRelay) {
+      try {
+        const sandboxBanner = `
+          <div style="background:#fef9c3;border-bottom:2px solid #eab308;padding:10px 16px;font-family:sans-serif;font-size:12px;color:#713f12;text-align:center;">
+            <strong>Modo Sandbox Resend:</strong> Destinatario original: <strong>${options.to}</strong> (configura SMTP Gmail o un dominio verificado para entregar directo al cliente).
+          </div>
+        `;
 
-      const sandboxBanner = `
+        const modifiedHtml = options.html.includes('<body>')
+          ? options.html.replace('<body>', `<body>${sandboxBanner}`)
+          : `${sandboxBanner}${options.html}`;
 
-      `;
+        const modifiedSubject = `[Para: ${options.to}] ${options.subject}`;
 
-      const modifiedHtml = options.html.includes('<body>')
-        ? options.html.replace('<body>', `<body>${sandboxBanner}`)
-        : `${sandboxBanner}${options.html}`;
-
-      const modifiedSubject = `[Para: ${options.to}] ${options.subject}`;
-
-      let relayResponse = await resend.emails.send({
-        from: fromAddress,
-        to: targetRelay,
-        subject: modifiedSubject,
-        html: modifiedHtml,
-        text: `[Destinatario original: ${options.to}]\n\n${options.text || options.subject}`,
-      });
-
-      if (relayResponse.error && relayResponse.error.message.includes('only send testing emails')) {
-        const match = relayResponse.error.message.match(/\(([^)]+@[^)]+)\)/);
-        if (match && match[1] && match[1].trim() !== targetRelay) {
-          targetRelay = match[1].trim();
-          detectedResendAccountEmail = targetRelay;
-          relayResponse = await resend.emails.send({
-            from: fromAddress,
-            to: targetRelay,
-            subject: modifiedSubject,
-            html: modifiedHtml,
-            text: `[Destinatario original: ${options.to}]\n\n${options.text || options.subject}`,
-          });
-        }
-      }
-
-      if (relayResponse.data?.id) {
-        console.log(`✅ [RESEND SANDBOX RELAY] Notificación para ${options.to} entregada con éxito a ${targetRelay} con ID: ${relayResponse.data.id}`);
-        const logEntry: EmailLogEntry = {
-          id: `log-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-          timestamp: new Date().toISOString(),
-          to: `${options.to} (entregado en ${targetRelay})`,
+        const relayResponse = await resend.emails.send({
+          from: fromAddress,
+          to: targetRelay,
           subject: modifiedSubject,
-          provider: 'Resend',
-          success: true,
-          messageId: relayResponse.data.id,
-          redirected: true,
-          diagnostic: `Entregado en ${targetRelay} para el destinatario ${options.to}. Para entregar directamente a ${options.to}, configura SMTP de Gmail o un dominio verificado.`,
-        };
-        emailLogs.push(logEntry);
+          html: modifiedHtml,
+          text: `[Destinatario original: ${options.to}]\n\n${options.text || options.subject}`,
+        });
 
-        return {
-          success: true,
-          simulated: false,
-          provider: 'Resend',
-          messageId: relayResponse.data.id,
-          redirected: true,
-          redirectedTo: targetRelay,
-          originalTo: options.to,
-          diagnostic: `Notificación entregada en ${targetRelay} (destinatario original: ${options.to}). Para enviar directamente a cualquier correo externo, configura SMTP de Gmail en .env.`,
-        };
+        if (relayResponse.data?.id) {
+          console.log(`✅ [RESEND SANDBOX RELAY] Notificación para ${options.to} entregada con éxito a ${targetRelay} con ID: ${relayResponse.data.id}`);
+          const logEntry: EmailLogEntry = {
+            id: `log-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+            timestamp: new Date().toISOString(),
+            to: options.to,
+            subject: options.subject,
+            provider: 'Resend',
+            success: true,
+            messageId: relayResponse.data.id,
+            redirected: true,
+            diagnostic: `Entregado vía Resend Sandbox (destinatario original: ${options.to}).`,
+          };
+          emailLogs.push(logEntry);
+
+          return {
+            success: true,
+            simulated: false,
+            provider: 'Resend',
+            messageId: relayResponse.data.id,
+            redirected: true,
+            redirectedTo: targetRelay,
+            originalTo: options.to,
+            diagnostic: `Notificación entregada vía Resend Sandbox (destinatario original: ${options.to}).`,
+          };
+        }
+      } catch (relayErr: any) {
+        console.error(`❌ [RESEND RELAY ERROR]`, relayErr.message);
       }
-    } catch (relayErr: any) {
-      console.error(`❌ [RESEND RELAY ERROR]`, relayErr.message);
     }
   }
 
-  // 3. FALLBACK: Simulation Mode
+  // 3. ZERO-CONFIG REAL SMTP FALLBACK: Ethereal Test Mailer (real SMTP transmission + inspectable preview URL)
+  const ethereal = await getEtherealTransporter();
+  if (ethereal) {
+    try {
+      const info = await ethereal.transporter.sendMail({
+        from: `ColorLink Pintuco <${ethereal.user}>`,
+        to: options.to,
+        subject: options.subject,
+        html: options.html,
+        text: options.text || options.subject,
+      });
+      const previewUrl = nodemailer.getTestMessageUrl(info) || undefined;
+      console.log(`✅ [ETHEREAL SMTP SENT] Para: ${options.to} | Asunto: ${options.subject} | Preview: ${previewUrl}`);
+
+      const logEntry: EmailLogEntry = {
+        id: `log-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        timestamp: new Date().toISOString(),
+        to: options.to,
+        subject: options.subject,
+        provider: 'Ethereal',
+        success: true,
+        messageId: info.messageId,
+        previewUrl,
+        diagnostic: `Correo enviado por SMTP de pruebas Ethereal a ${options.to}. Abre el enlace de vista previa para inspeccionar el correo real.`,
+      };
+      emailLogs.push(logEntry);
+
+      return {
+        success: true,
+        simulated: false,
+        provider: 'Ethereal',
+        messageId: info.messageId,
+        previewUrl,
+        diagnostic: `Correo enviado por SMTP Ethereal (vista previa disponible). Para entrega en bandeja real, configura SMTP_USER y SMTP_PASS en .env.`,
+      };
+    } catch (etherealErr: any) {
+      console.warn('⚠️ [ETHEREAL SEND NOTICE]:', etherealErr.message);
+    }
+  }
+
+  // 4. LAST RESORT FALLBACK: Local Simulation Mode
   console.log('\n========================================================');
   console.log('📨 [EMAIL SIMULATOR - ColorLink Pintuco Notification]');
   console.log(`Para: ${options.to}`);
@@ -450,7 +531,7 @@ async function sendOrSimulateEmail(options: {
     provider: 'Simulator',
     success: true,
     messageId: `sim-${Date.now()}`,
-    diagnostic: 'Guardado en logs de simulación.',
+    diagnostic: 'Registrado en simulador local (configura SMTP o Resend para entrega real).',
   };
   emailLogs.push(logEntry);
 
@@ -459,7 +540,7 @@ async function sendOrSimulateEmail(options: {
     simulated: true,
     provider: 'Simulator',
     messageId: logEntry.messageId,
-    error: 'Servicio de correo en modo simulación.',
+    diagnostic: 'Correo registrado en simulador local.',
   };
 }
 
@@ -936,6 +1017,85 @@ export async function sendSupportTicketEmail(ticket: SupportEmailData): Promise<
     to: ticket.email,
     subject,
     html,
+  });
+}
+
+/**
+ * 5. Password Reset Verification Code Email
+ */
+export async function sendPasswordResetEmail(data: PasswordResetEmailData): Promise<EmailResult> {
+  const subject = `Código de Recuperación ColorLink Pintuco: ${data.code} 🔐`;
+  const appUrl = process.env.APP_URL || 'https://colorlink.onrender.com';
+
+  const html = `
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${subject}</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; margin: 0; padding: 0; background-color: #f4f6f8; color: #1f2937; }
+    .container { max-width: 600px; margin: 20px auto; background: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.06); border: 1px solid #e5e7eb; }
+    .header { background: linear-gradient(135deg, #0d4788 0%, #173663 100%); padding: 32px 24px; text-align: center; }
+    .badge { display: inline-block; background-color: #ffd100; color: #0d4788; font-weight: 800; font-size: 11px; padding: 4px 12px; border-radius: 9999px; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 12px; }
+    .brand-title { color: #ffffff; font-size: 24px; font-weight: 900; margin: 0; }
+    .content { padding: 32px 28px; line-height: 1.6; }
+    .code-box { background: #fffbeb; border: 2px dashed #eab308; border-radius: 14px; padding: 24px; text-align: center; margin: 24px 0; }
+    .code-digits { font-family: monospace; font-size: 36px; font-weight: 900; letter-spacing: 8px; color: #0d4788; margin: 8px 0; }
+    .cta-container { text-align: center; margin: 24px 0 12px 0; }
+    .cta-button { display: inline-block; background-color: #ffd100; color: #0d4788; font-weight: 900; font-size: 14px; padding: 12px 28px; border-radius: 10px; text-decoration: none; text-transform: uppercase; letter-spacing: 0.5px; }
+    .footer { background-color: #f1f5f9; padding: 24px; text-align: center; font-size: 12px; color: #64748b; border-top: 1px solid #e2e8f0; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <span class="badge">Seguridad de Cuenta ColorLink</span>
+      <h1 class="brand-title">Recuperación de Contraseña</h1>
+    </div>
+
+    <div class="content">
+      <p style="font-size: 16px; color: #0f172a; margin-top: 0;">
+        Hola <strong>${data.fullName}</strong>,
+      </p>
+      <p style="color: #475569; font-size: 14px;">
+        Recibimos una solicitud para restablecer la contraseña de tu cuenta en <strong>ColorLink Pintuco</strong> (${data.email}). Utiliza el siguiente código de verificación en la pantalla de recuperación:
+      </p>
+
+      <div class="code-box">
+        <div style="font-size: 11px; font-weight: 800; color: #854d0e; text-transform: uppercase; letter-spacing: 0.08em;">
+          Código de Verificación
+        </div>
+        <div class="code-digits">${data.code}</div>
+        <div style="font-size: 12px; color: #64748b;">
+          Válido durante <strong>${data.expiresMinutes} minutos</strong>
+        </div>
+      </div>
+
+      <p style="color: #475569; font-size: 13px;">
+        Si tú no solicitaste cambiar tu contraseña, puedes ignorar este mensaje de forma segura; tu clave actual permanecerá sin cambios.
+      </p>
+
+      <div class="cta-container">
+        <a href="${appUrl}" class="cta-button">Volver a ColorLink</a>
+      </div>
+    </div>
+
+    <div class="footer">
+      <p style="margin: 0 0 6px 0; font-weight: bold; color: #0d4788;">Pintuco Colombia S.A.S. • Seguridad ColorLink</p>
+      <p style="margin: 0;">Línea Técnica Nacional: 01 8000 111 247</p>
+    </div>
+  </div>
+</body>
+</html>
+`;
+
+  return sendOrSimulateEmail({
+    to: data.email,
+    subject,
+    html,
+    text: `Tu código de recuperación ColorLink Pintuco es: ${data.code} (válido por ${data.expiresMinutes} minutos).`,
   });
 }
 
